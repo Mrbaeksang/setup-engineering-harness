@@ -1,0 +1,33 @@
+{
+  "_ownership": "user-owned; seeded once and never overwritten by the installer",
+  "schema_version": 1,
+  "adaptive_task_context": {
+    "enabled": true,
+    "max_characters": 1800
+  },
+  "architecture_defaults": {
+    "ddd": true,
+    "modular": true,
+    "hexagonal": true,
+    "ceremonial_layers": false
+  },
+  "project": {
+    "canonical_documentation": [],
+    "constraints": [],
+    "domain_vocabulary": []
+  },
+  "research": {
+    "official_source_hosts": [],
+    "read_only_tool_names": []
+  },
+  "write_gate": {
+    "auto_approve_reversible_lite": true,
+    "lease_minutes": 30,
+    "max_auto_scope_globs": 8
+  },
+  "verification": {
+    "performance_scenarios": [],
+    "required_commands": [],
+    "ui_flows": []
+  }
+}

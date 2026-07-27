@@ -1,0 +1,4 @@
+interface:
+  display_name: "Setup Engineering Harness"
+  short_description: "Install an evidence-gated coding workflow"
+  default_prompt: "Use $setup-engineering-harness to inspect this repository and install its evidence-gated coding workflow."

@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+
+.pytest_cache/
+.coverage
+htmlcov/
+
+.agent-harness/state/
+.chief/
+
+benchmarks/results/*.jsonl
+benchmarks/results/*.attestation.json
+benchmarks/results/*.raw.json
+
+# Deliberately installed-package-shaped dependency research fixture.
+!tests/behavior/fixtures/stream-markdown-native-option/node_modules/
+!tests/behavior/fixtures/stream-markdown-native-option/node_modules/stream-markdown/
+!tests/behavior/fixtures/stream-markdown-native-option/node_modules/stream-markdown/**
