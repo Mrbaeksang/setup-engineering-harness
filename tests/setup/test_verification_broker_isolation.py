@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -274,6 +275,48 @@ class VerificationBrokerIsolationTests(unittest.TestCase):
             except ValueError:
                 continue
             self.fail(f"runtime allowlist exposes private SSL path via {candidate}")
+
+    def test_python_runtime_allowlist_uses_precise_sysconfig_paths(self) -> None:
+        if platform.system() != "Linux":
+            self.skipTest("Python runtime paths are a Linux Landlock concern")
+        installation = self.base / "hostedtoolcache" / "Python" / "3.12" / "x64"
+        stdlib = installation / "lib" / "python3.12"
+        purelib = installation / "lib" / "python3.12" / "site-packages"
+        sibling_secret = installation.parent / "credentials.txt"
+        stdlib.mkdir(parents=True)
+        purelib.mkdir()
+        sibling_secret.write_text("must-not-read\n", encoding="utf-8")
+        runtime_paths = runpy.run_path(str(BROKER_SOURCE))[
+            "_linux_readable_runtime_paths"
+        ]
+
+        with patch.object(
+            sysconfig,
+            "get_paths",
+            return_value={
+                "stdlib": str(stdlib),
+                "platstdlib": str(stdlib),
+                "purelib": str(purelib),
+                "platlib": str(purelib),
+                "data": str(installation),
+            },
+        ):
+            readable = runtime_paths(
+                [sys.executable],
+                {"PATH": os.environ.get("PATH", "")},
+            )
+
+        self.assertIn(stdlib.resolve(strict=True), readable)
+        self.assertIn(purelib.resolve(strict=True), readable)
+        self.assertNotIn(installation.resolve(strict=True), readable)
+        for candidate in readable:
+            if not candidate.is_dir():
+                continue
+            try:
+                sibling_secret.resolve(strict=True).relative_to(candidate)
+            except ValueError:
+                continue
+            self.fail(f"runtime allowlist exposes sibling secret via {candidate}")
 
     def test_node_can_start_a_worker_thread_under_uid_relative_limit(self) -> None:
         if platform.system() != "Linux":
