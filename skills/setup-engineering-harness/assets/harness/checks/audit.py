@@ -20,6 +20,14 @@ from typing import Any
 MANIFEST_RELATIVE = ".agent-harness/manifest.json"
 RUNTIME_CONTRACT_RELATIVE = ".agent-harness/runtime/runtime-contract.json"
 PROVIDER_VERIFICATION_TTL = timedelta(hours=24)
+PROVIDER_BINARIES = {
+    "claude-code": "claude",
+    "codex": "codex",
+}
+PROVIDER_HOOK_PATHS = {
+    "claude-code": ".claude/settings.json",
+    "codex": ".codex/hooks.json",
+}
 _LANDLOCK_CREATE_RULESET = 444
 _LANDLOCK_CREATE_RULESET_VERSION = 1
 _LINUX_SECCOMP_SOCKET_ARCHITECTURES = {
@@ -200,7 +208,7 @@ def audit(root: Path) -> tuple[list[str], list[str], int]:
                     if digest_bytes(content[begin:finish]) != expected:
                         raise ValueError("managed bridge drift")
                 except (OSError, ValueError) as error:
-                    issues.append(f"AGENTS.md: {error}")
+                    issues.append(f"{block.get('path', 'instruction bridge')}: {error}")
                 checked += 1
 
     owned = manifest.get("owned_files")
@@ -311,7 +319,23 @@ def audit(root: Path) -> tuple[list[str], list[str], int]:
         incomplete.append(isolator_detail)
     checked += 1
 
-    hook_file = project_path(root, manifest.get("provider_hooks", {}).get("path"))
+    provider_hooks = manifest.get("provider_hooks")
+    provider_id = (
+        provider_hooks.get("provider")
+        if isinstance(provider_hooks, dict)
+        else None
+    )
+    hook_relative = (
+        provider_hooks.get("path")
+        if isinstance(provider_hooks, dict)
+        else None
+    )
+    if (
+        provider_id not in PROVIDER_BINARIES
+        or PROVIDER_HOOK_PATHS.get(provider_id) != hook_relative
+    ):
+        issues.append(f"{MANIFEST_RELATIVE}: provider identity or hook path is invalid")
+    hook_file = project_path(root, hook_relative)
     hook_data: dict[str, Any] = {}
     if hook_file is None:
         issues.append("provider hook path is invalid")
@@ -319,8 +343,12 @@ def audit(root: Path) -> tuple[list[str], list[str], int]:
         try:
             hook_data = load_object(hook_file)
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
-            issues.append(f".codex/hooks.json: invalid ({error})")
-    managed_hooks = manifest.get("provider_hooks", {}).get("managed_entries")
+            issues.append(f"{hook_relative}: invalid ({error})")
+    managed_hooks = (
+        provider_hooks.get("managed_entries")
+        if isinstance(provider_hooks, dict)
+        else None
+    )
     if not isinstance(managed_hooks, list):
         issues.append(f"{MANIFEST_RELATIVE}: managed hook entries are malformed")
     else:
@@ -336,9 +364,11 @@ def audit(root: Path) -> tuple[list[str], list[str], int]:
                 continue
             entries = managed_hook_entries(hook_data, event, hook_id)
             if len(entries) != 1:
-                issues.append(f".codex/hooks.json: expected one managed {event} {hook_id}")
+                issues.append(
+                    f"{hook_relative}: expected one managed {event} {hook_id}"
+                )
             elif canonical_digest(entries[0]) != expected:
-                issues.append(f".codex/hooks.json: managed {event} {hook_id} drift")
+                issues.append(f"{hook_relative}: managed {event} {hook_id} drift")
             checked += 1
 
     host = manifest.get("host_runtime")
@@ -401,6 +431,8 @@ def audit(root: Path) -> tuple[list[str], list[str], int]:
                 status = load_object(Path(status_value))
                 if status.get("projectRoot") != str(root):
                     raise ValueError("status belongs to another Project")
+                if status.get("providerId") != provider_id:
+                    raise ValueError("status provider does not match manifest")
                 broker = root / ".agent-harness" / "bin" / "read_context.py"
                 if status.get("contextBrokerSha256") != digest_bytes(broker.read_bytes()):
                     raise ValueError("context broker digest mismatch")
@@ -414,7 +446,7 @@ def audit(root: Path) -> tuple[list[str], list[str], int]:
                     or runtime_capabilities.get("provider_trust_verification") is not True
                     or status.get("verifiedManifestChecksum")
                     != manifest.get("manifest_checksum")
-                    or not provider_receipt_is_current(status)
+                    or not provider_receipt_is_current(status, provider_id)
                 ):
                     incomplete.append("provider hook trust is not verified")
                 if (
@@ -437,7 +469,9 @@ def audit(root: Path) -> tuple[list[str], list[str], int]:
     return sorted(set(issues)), sorted(set(incomplete)), checked
 
 
-def provider_receipt_is_current(status: dict[str, Any]) -> bool:
+def provider_receipt_is_current(
+    status: dict[str, Any], provider_id: Any
+) -> bool:
     binary_value = status.get("providerBinary")
     digest = status.get("providerBinarySha256")
     version = status.get("providerVersion")
@@ -458,13 +492,17 @@ def provider_receipt_is_current(status: dict[str, Any]) -> bool:
         and canonical_digest(receipt) == evidence_digest
         and receipt.get("providerBinary") == binary_value
         and receipt.get("providerBinarySha256") == digest
+        and receipt.get("providerId") == provider_id
         and receipt.get("providerVersion") == version
         and receipt.get("verifiedAt") == verified_at
         and receipt.get("manifestChecksum")
         == status.get("verifiedManifestChecksum")
     ):
         return False
-    current = shutil.which("codex")
+    binary_name = PROVIDER_BINARIES.get(provider_id)
+    if binary_name is None:
+        return False
+    current = shutil.which(binary_name)
     if not current:
         return False
     try:

@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -254,6 +255,43 @@ class VerificationBrokerIsolationTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_hosted_toolcache_can_read_only_selected_tool_runtime(self) -> None:
+        if platform.system() != "Linux":
+            self.skipTest("hosted tool paths are a Linux Landlock concern")
+        openssl_config = Path("/etc/ssl/openssl.cnf")
+        if not openssl_config.is_file():
+            self.skipTest("the host does not expose the standard OpenSSL config")
+        toolcache_root = self.base / "opt" / "hostedtoolcache"
+        installation = toolcache_root / "node" / "24.15.0" / "x64"
+        bin_directory = installation / "bin"
+        runtime_file = installation / "lib" / "npm" / "runtime.txt"
+        outside_file = toolcache_root / "credential.txt"
+        bin_directory.mkdir(parents=True)
+        runtime_file.parent.mkdir(parents=True)
+        runtime_file.write_text("runtime-ok\n", encoding="utf-8")
+        outside_file.write_text("must-not-read\n", encoding="utf-8")
+        fake_npm = bin_directory / "npm"
+        fake_npm.write_text(
+            "#!/bin/sh\n"
+            f"IFS= read -r value < {shlex.quote(str(runtime_file))} || exit 12\n"
+            '[ "$value" = "runtime-ok" ] || exit 13\n'
+            f"IFS= read -r _ < {shlex.quote(str(openssl_config))} || exit 15\n"
+            f"IFS= read -r leaked < {shlex.quote(str(outside_file))} && exit 14\n"
+            "exit 0\n",
+            encoding="utf-8",
+        )
+        fake_npm.chmod(0o755)
+        environment = os.environ.copy()
+        environment["PATH"] = (
+            str(bin_directory)
+            + os.pathsep
+            + environment.get("PATH", "")
+        )
+
+        result = self.run_command("npm", environment=environment)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_openssl_allowlist_does_not_expose_private_directory(self) -> None:
         if platform.system() != "Linux":
             self.skipTest("OpenSSL paths are a Linux Landlock concern")
@@ -274,6 +312,48 @@ class VerificationBrokerIsolationTests(unittest.TestCase):
             except ValueError:
                 continue
             self.fail(f"runtime allowlist exposes private SSL path via {candidate}")
+
+    def test_python_runtime_allowlist_uses_precise_sysconfig_paths(self) -> None:
+        if platform.system() != "Linux":
+            self.skipTest("Python runtime paths are a Linux Landlock concern")
+        installation = self.base / "hostedtoolcache" / "Python" / "3.12" / "x64"
+        stdlib = installation / "lib" / "python3.12"
+        purelib = installation / "lib" / "python3.12" / "site-packages"
+        sibling_secret = installation.parent / "credentials.txt"
+        stdlib.mkdir(parents=True)
+        purelib.mkdir()
+        sibling_secret.write_text("must-not-read\n", encoding="utf-8")
+        runtime_paths = runpy.run_path(str(BROKER_SOURCE))[
+            "_linux_readable_runtime_paths"
+        ]
+
+        with patch.object(
+            sysconfig,
+            "get_paths",
+            return_value={
+                "stdlib": str(stdlib),
+                "platstdlib": str(stdlib),
+                "purelib": str(purelib),
+                "platlib": str(purelib),
+                "data": str(installation),
+            },
+        ):
+            readable = runtime_paths(
+                [sys.executable],
+                {"PATH": os.environ.get("PATH", "")},
+            )
+
+        self.assertIn(stdlib.resolve(strict=True), readable)
+        self.assertIn(purelib.resolve(strict=True), readable)
+        self.assertNotIn(installation.resolve(strict=True), readable)
+        for candidate in readable:
+            if not candidate.is_dir():
+                continue
+            try:
+                sibling_secret.resolve(strict=True).relative_to(candidate)
+            except ValueError:
+                continue
+            self.fail(f"runtime allowlist exposes sibling secret via {candidate}")
 
     def test_node_can_start_a_worker_thread_under_uid_relative_limit(self) -> None:
         if platform.system() != "Linux":

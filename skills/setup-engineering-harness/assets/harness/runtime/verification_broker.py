@@ -18,6 +18,7 @@ import signal
 import stat
 import subprocess
 import sys
+import sysconfig
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -431,6 +432,12 @@ def _linux_readable_runtime_paths(
             "/etc/ssl/openssl.cnf",
         )
     )
+    python_paths = sysconfig.get_paths()
+    candidates.extend(
+        Path(value)
+        for key in ("stdlib", "platstdlib", "purelib", "platlib")
+        if (value := python_paths.get(key))
+    )
     executable_names = {
         arguments[0],
         "bash",
@@ -460,6 +467,7 @@ def _linux_readable_runtime_paths(
         for marker, depth in (
             (".nvm", 4),
             ("fnm", 3),
+            ("hostedtoolcache", 3),
             (".pyenv", 3),
             (".rustup", 3),
         ):

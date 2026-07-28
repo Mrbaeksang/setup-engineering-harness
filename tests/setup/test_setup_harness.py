@@ -40,9 +40,15 @@ class SetupHarnessTest(unittest.TestCase):
         self.env["XDG_STATE_HOME"] = str(self.state_home)
 
     def run_setup(
-        self, command: str, *, as_json: bool = False
+        self,
+        command: str,
+        *,
+        as_json: bool = False,
+        provider: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         arguments = [sys.executable, str(SCRIPT), command, "--repo", str(self.repo)]
+        if provider is not None:
+            arguments.extend(["--provider", provider])
         if as_json:
             arguments.append("--json")
         return subprocess.run(
@@ -127,6 +133,106 @@ class SetupHarnessTest(unittest.TestCase):
         self.assertEqual(len(unittest_commands), 1)
         self.assertEqual(unittest_commands[0]["kind"], "test")
         self.assertFalse(unittest_commands[0]["executed"])
+
+    def test_claude_plan_targets_claude_instruction_and_hook_files(self) -> None:
+        original_agents = self.seed_javascript_project()
+        original_claude = b"# Existing Claude instructions\n\nKeep this."
+        (self.repo / "CLAUDE.md").write_bytes(original_claude)
+
+        planned = self.run_setup(
+            "plan", as_json=True, provider="claude-code"
+        )
+
+        self.assertEqual(planned.returncode, 0, planned.stderr)
+        payload = json.loads(planned.stdout)
+        mutation_paths = {
+            mutation["path"] for mutation in payload["mutations"]
+        }
+        self.assertIn("CLAUDE.md", mutation_paths)
+        self.assertIn(".claude/settings.json", mutation_paths)
+        self.assertNotIn("AGENTS.md", mutation_paths)
+        self.assertNotIn(".codex/hooks.json", mutation_paths)
+        self.assertEqual((self.repo / "AGENTS.md").read_bytes(), original_agents)
+        self.assertEqual((self.repo / "CLAUDE.md").read_bytes(), original_claude)
+
+    def test_claude_install_audit_and_uninstall_are_provider_bound(self) -> None:
+        original_agents = self.seed_javascript_project()
+        original_claude = b"# Existing Claude instructions\n"
+        (self.repo / "CLAUDE.md").write_bytes(original_claude)
+
+        installed = self.run_setup("install", provider="claude-code")
+
+        self.assertEqual(installed.returncode, 3, installed.stdout + installed.stderr)
+        self.assertEqual((self.repo / "AGENTS.md").read_bytes(), original_agents)
+        claude = (self.repo / "CLAUDE.md").read_bytes()
+        self.assertTrue(claude.startswith(original_claude))
+        self.assertEqual(claude.count(BRIDGE_START), 1)
+        settings = json.loads(
+            (self.repo / ".claude" / "settings.json").read_text()
+        )
+        self.assertEqual(
+            settings["hooks"]["PreToolUse"][0]["matcher"], "*"
+        )
+        manifest = json.loads(
+            (self.repo / ".agent-harness" / "manifest.json").read_text()
+        )
+        self.assertEqual(
+            manifest["provider_hooks"]["provider"], "claude-code"
+        )
+        self.assertEqual(
+            manifest["provider_hooks"]["path"], ".claude/settings.json"
+        )
+        status = json.loads(
+            Path(manifest["host_runtime"]["status_path"]).read_text()
+        )
+        self.assertEqual(status["providerId"], "claude-code")
+        repository_after_install = self.snapshot(self.repo)
+        state_after_install = self.snapshot(self.state_home)
+
+        repeated = self.run_setup("install", provider="claude-code")
+        self.assertEqual(
+            repeated.returncode, 3, repeated.stdout + repeated.stderr
+        )
+        self.assertIn("already current", repeated.stdout)
+        self.assertEqual(self.snapshot(self.repo), repository_after_install)
+        self.assertEqual(self.snapshot(self.state_home), state_after_install)
+
+        wrong_provider = self.run_setup("plan", provider="codex")
+        self.assertEqual(wrong_provider.returncode, 2)
+        self.assertIn("installed provider is claude-code", wrong_provider.stdout)
+
+        removed = self.run_setup("uninstall")
+        self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
+        self.assertEqual((self.repo / "CLAUDE.md").read_bytes(), original_claude)
+        self.assertEqual((self.repo / "AGENTS.md").read_bytes(), original_agents)
+        self.assertFalse((self.repo / ".claude" / "settings.json").exists())
+
+    def test_legacy_codex_install_is_bound_to_explicit_provider(self) -> None:
+        self.seed_javascript_project()
+        self.assertEqual(self.run_setup("install").returncode, 3)
+        module = load_installer()
+        manifest_path = (
+            self.repo / ".agent-harness" / "manifest.json"
+        )
+        manifest = json.loads(manifest_path.read_text())
+        manifest["provider_hooks"].pop("provider")
+        manifest = module.seal_manifest(manifest)
+        manifest_path.write_bytes(module.json_bytes(manifest))
+        status_path = Path(manifest["host_runtime"]["status_path"])
+        status = json.loads(status_path.read_text())
+        status.pop("providerId")
+        status_path.write_bytes(module.json_bytes(status))
+
+        migrated = self.run_setup("install")
+
+        self.assertEqual(migrated.returncode, 3, migrated.stdout + migrated.stderr)
+        migrated_manifest = json.loads(manifest_path.read_text())
+        migrated_status = json.loads(status_path.read_text())
+        self.assertEqual(
+            migrated_manifest["provider_hooks"]["provider"], "codex"
+        )
+        self.assertEqual(migrated_status["providerId"], "codex")
+        self.assertFalse(migrated_status["hookTrustVerified"])
 
     def test_plan_registers_direct_node_test_without_guessing_package_manager(
         self,
@@ -599,6 +705,7 @@ class SetupHarnessTest(unittest.TestCase):
             set(MINIMUM_PROTECTED_GLOBS).issubset(parsed.protected_globs)
         )
         self.assertIn(".codex/hooks.json", parsed.protected_globs)
+        self.assertIn(".claude/settings.json", parsed.protected_globs)
         self.assertEqual(
             tuple(map(str, parsed.read_broker_python_executables)),
             (str(Path(sys.executable).resolve()),),
@@ -694,6 +801,77 @@ class SetupHarnessTest(unittest.TestCase):
         stale = self.run_setup("audit")
         self.assertEqual(stale.returncode, 3, stale.stdout + stale.stderr)
         self.assertIn("provider hook trust is not verified", stale.stdout)
+
+    def test_claude_provider_verification_uses_constrained_write_canary(self) -> None:
+        self.seed_javascript_project()
+        self.assertEqual(
+            self.run_setup("install", provider="claude-code").returncode,
+            3,
+        )
+        module = load_installer()
+        fake_bin = self.base / "bin"
+        fake_bin.mkdir()
+        fake_claude = fake_bin / "claude"
+        fake_claude.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_claude.chmod(0o755)
+        self.env["PATH"] = (
+            str(fake_bin) + os.pathsep + self.env.get("PATH", "")
+        )
+
+        def fake_run(
+            command: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            if any(str(item).endswith("audit.py") for item in command):
+                return subprocess.run(command, **kwargs)
+            if command[-1] == "--version":
+                return subprocess.CompletedProcess(
+                    command, 0, stdout="2.1.215 (Claude Code)\n", stderr=""
+                )
+            self.assertIn("--include-hook-events", command)
+            self.assertIn("--tools", command)
+            self.assertIn("Write", command)
+            self.assertIn("--permission-mode", command)
+            self.assertIn("acceptEdits", command)
+            self.assertNotIn("--dangerously-skip-permissions", command)
+            event = {
+                "type": "hook_response",
+                "hook_event_name": "PreToolUse",
+                "output": {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": (
+                            "Engineering Harness: writing is locked"
+                        ),
+                    }
+                },
+            }
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(event) + "\n",
+                stderr="",
+            )
+
+        with mock.patch.dict(os.environ, self.env, clear=False):
+            result = module.verify_provider(
+                self.repo.resolve(),
+                provider=module.provider_spec("claude-code"),
+                run_process=fake_run,
+                find_binary=lambda _name: str(fake_claude),
+            )
+
+        self.assertEqual(result, 0)
+        manifest = json.loads(
+            (self.repo / ".agent-harness" / "manifest.json").read_text()
+        )
+        status = json.loads(
+            Path(manifest["host_runtime"]["status_path"]).read_text()
+        )
+        self.assertEqual(status["providerId"], "claude-code")
+        self.assertEqual(
+            status["providerReceipt"]["providerId"], "claude-code"
+        )
 
     def test_atomic_failure_rolls_back_project_and_host(self) -> None:
         original = self.seed_javascript_project()

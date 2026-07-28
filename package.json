@@ -1,0 +1,46 @@
+{
+  "name": "setup-engineering-harness",
+  "version": "0.1.0",
+  "description": "Install an evidence-gated engineering workflow into a repository.",
+  "license": "Apache-2.0",
+  "author": "Mrbaeksang",
+  "type": "module",
+  "bin": {
+    "setup-engineering-harness": "bin/setup-engineering-harness.mjs"
+  },
+  "files": [
+    "bin/",
+    "skills/setup-engineering-harness/",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py' && node --test tests/npm/*.test.mjs",
+    "test:npm": "node --test tests/npm/*.test.mjs",
+    "verify:distribution": "node scripts/verify-distribution.mjs",
+    "prepack": "npm run verify:distribution",
+    "prepublishOnly": "npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mrbaeksang/setup-engineering-harness.git"
+  },
+  "homepage": "https://github.com/Mrbaeksang/setup-engineering-harness#readme",
+  "bugs": {
+    "url": "https://github.com/Mrbaeksang/setup-engineering-harness/issues"
+  },
+  "keywords": [
+    "agent-skills",
+    "claude-code",
+    "codex",
+    "developer-tools",
+    "evidence-gated"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

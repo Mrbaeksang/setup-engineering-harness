@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install verification isolator
+        run: sudo apt-get update && sudo apt-get install --yes bubblewrap
+
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm pack --dry-run
+
+      - name: Validate Claude plugin with stable Claude Code
+        run: >-
+          npx --yes --package @anthropic-ai/claude-code@2.1.212 --
+          claude plugin validate . --strict
+
+      - name: Validate Claude plugin with current Claude Code
+        run: >-
+          npx --yes --package @anthropic-ai/claude-code@2.1.220 --
+          claude plugin validate . --strict

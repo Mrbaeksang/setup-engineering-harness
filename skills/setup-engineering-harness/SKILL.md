@@ -11,10 +11,12 @@ Playbooks only when routed.
 ## One-shot workflow
 
 1. Resolve the target Project; never target this Skill directory.
-2. Run the read-only preview:
+2. Resolve the current provider as `codex` or `claude-code`. If the host is
+   unclear, ask one objective provider choice. Run the read-only preview:
 
    ```bash
-   python3 <skill-dir>/scripts/setup_harness.py plan --repo <project>
+   python3 <skill-dir>/scripts/setup_harness.py plan \
+     --provider <provider> --repo <project>
    ```
 
 3. Present detected facts and unresolved decisions together. Make every choice objectively
@@ -23,16 +25,19 @@ Playbooks only when routed.
 5. Install, run the normal-provider canary, then audit:
 
    ```bash
-   python3 <skill-dir>/scripts/setup_harness.py install --repo <project>
-   python3 <skill-dir>/scripts/setup_harness.py verify-provider --repo <project>
+   python3 <skill-dir>/scripts/setup_harness.py install \
+     --provider <provider> --repo <project>
+   python3 <skill-dir>/scripts/setup_harness.py verify-provider \
+     --provider <provider> --repo <project>
    python3 <skill-dir>/scripts/setup_harness.py audit --repo <project>
    ```
 
-   `verify-provider` starts one fresh Codex session in `read-only` sandbox mode and does not pass
-   `--dangerously-bypass-hook-trust`. If Codex has not reviewed the exact Project hooks, tell the
-   user to open Codex in the Project, run `/hooks`, review and trust the two Engineering Harness
-   entries, then rerun `verify-provider`. Persisted hook trust is a Codex/user security decision;
-   do not forge or edit it.
+   `verify-provider` starts one constrained fresh provider session and proves
+   that its `PreToolUse` hook denies a reserved write canary. If the provider
+   has not reviewed the exact Project hooks, tell the user to open it in the
+   Project, run `/hooks`, review and trust the two Engineering Harness entries,
+   then rerun `verify-provider`. Persisted hook trust is a provider/user
+   security decision; do not forge or edit it.
 
 6. Report `PASS`, `INCOMPLETE`, or `FAIL` exactly. `INCOMPLETE` means an enforcement prerequisite
    is still unverified.
@@ -44,11 +49,13 @@ current manifest checksum.
 
 ## Ownership and recovery
 
-- Preserve every existing `AGENTS.md` byte outside the stable managed block.
+- Preserve every existing provider instruction file byte outside the stable
+  managed block (`AGENTS.md` for Codex or `CLAUDE.md` for Claude Code).
 - Treat `.agent-harness/config.json` and `.agent-harness/local.md` as user-owned seed-once files.
 - Treat the manifest, repository profile, Router, Playbooks, checker, and broker as
   installer-owned.
-- Preserve unrelated provider hooks. Manage exactly one `PreToolUse` and one
+- Preserve unrelated provider hooks in `.codex/hooks.json` or
+  `.claude/settings.json`. Manage exactly one `PreToolUse` and one
   `UserPromptSubmit` entry.
 - Stop `install` on owned drift without writing. Use `repair` only after explicit approval; it
   writes content-addressed recovery copies before replacement.
@@ -58,11 +65,11 @@ current manifest checksum.
 Commands:
 
 ```bash
-python3 <skill-dir>/scripts/setup_harness.py plan --repo <project>
-python3 <skill-dir>/scripts/setup_harness.py install --repo <project>
-python3 <skill-dir>/scripts/setup_harness.py verify-provider --repo <project>
+python3 <skill-dir>/scripts/setup_harness.py plan --provider <provider> --repo <project>
+python3 <skill-dir>/scripts/setup_harness.py install --provider <provider> --repo <project>
+python3 <skill-dir>/scripts/setup_harness.py verify-provider --provider <provider> --repo <project>
 python3 <skill-dir>/scripts/setup_harness.py audit --repo <project>
-python3 <skill-dir>/scripts/setup_harness.py repair --repo <project>
+python3 <skill-dir>/scripts/setup_harness.py repair --provider <provider> --repo <project>
 python3 <skill-dir>/scripts/setup_harness.py uninstall --repo <project>
 ```
 

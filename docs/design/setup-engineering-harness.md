@@ -34,7 +34,7 @@ canonical 문서다. 진행 일지나 미래 로드맵이 아니다.
 ## Assumptions
 
 - 로컬 우선, 단일 사용자, Git 저장소를 기준으로 한다.
-- 현재 설치 가능한 provider 경계는 Codex project hook이다.
+- 현재 설치 가능한 provider 경계는 Codex와 Claude Code project hook이다.
 - Python 3.12 표준 라이브러리만으로 Setup과 host runtime을 실행한다.
 - Linux/WSL에서는 `bubblewrap`, macOS에서는 `sandbox-exec`이 있어야
   관리형 검증을 완료 증거로 사용할 수 있다.
@@ -47,7 +47,8 @@ canonical 문서다. 진행 일지나 미래 로드맵이 아니다.
 
 - 결정적인 `plan`, `install`, `verify-provider`, `audit`, `repair`,
   `uninstall`
-- 기존 `AGENTS.md`와 `.codex/hooks.json`을 보존하는 managed merge
+- 기존 provider instruction과 hook 설정을 보존하는 managed merge
+- npm 실행기, Agent Skill, Claude Code Marketplace의 단일 버전 배포
 - manifest, lockfile, 검증 script, instruction 파일의 bounded profiling
 - 얇은 instruction bridge와 task-triggered Playbook
 - 검색·부분 읽기·얕은 구조 지도·안전한 Git diff를 제공하는 read broker
@@ -57,7 +58,7 @@ canonical 문서다. 진행 일지나 미래 로드맵이 아니다.
 - control / stable / adaptive-R&D를 비교하는 benchmark 및 scoring runtime
 
 현재 제품 경계 밖의 기능을 이 문서에 약속하지 않는다. 특히 이 구현은
-멀티에이전트 세션 관리, TUI, daemon, 배포 자동화, vector memory,
+멀티에이전트 세션 관리, TUI, daemon, 애플리케이션 배포 자동화, vector memory,
 범용 workflow engine이 아니다.
 
 ## 설계 후보와 선택
@@ -150,7 +151,7 @@ Dependency signal이 있으면 다음 순서로 좁혀 읽는다.
 사용자 Prompt
     │
     ▼
-Codex UserPromptSubmit Hook
+Provider UserPromptSubmit Hook
     ├── Task/Revision 생성 또는 갱신
     ├── 기존 Write Lease 폐기
     └── bounded Context Pack 주입
@@ -163,7 +164,7 @@ Codex UserPromptSubmit Hook
         └── apply_patch / shell        │
              │                         │
              ▼                         │
-Codex PreToolUse Hook                   │
+Provider PreToolUse Hook                │
     └── host-side Policy Gate ◀────────┘
              │
       allow / deny / context
@@ -177,8 +178,9 @@ Setup 결과는 두 trust zone으로 나뉜다.
 ```text
 Project Git tree                         Host user state
 ────────────────────────────────────    ─────────────────────────────
-AGENTS.md managed bridge                trusted hook runtime
-.codex/hooks.json                       authoritative gate-state.json
+AGENTS.md 또는 CLAUDE.md bridge         trusted hook runtime
+.codex/hooks.json 또는                  authoritative gate-state.json
+.claude/settings.json
 .agent-harness/router.md                setup-status.json
 .agent-harness/playbooks/*              proposals and receipts
 .agent-harness/repo-profile.json        synchronization locks
@@ -361,8 +363,10 @@ interface CompletionReceipt {
 - `Bash`와 `apply_patch`는 `tool_input.command`를 사용한다.
 - 출력: allow, deny reason, 또는 추가 context
 
-공식 Codex 계약상 shell/`exec_command`는 `Bash`, patch는
-`apply_patch`다. 수동 replay에서도 이 이름을 바꾸면 유효한 비교가 아니다.
+Codex와 Claude Code의 hook payload는 같은 event envelope를 사용하지만
+tool 이름은 provider-native 값을 보존한다. Codex의 `exec_command`와
+`apply_patch`, Claude Code의 `Bash`, `Write`, `Edit`를 임의로 바꾼
+수동 replay는 유효한 provider 비교가 아니다.
 
 ### Project brokers
 
@@ -497,8 +501,12 @@ payload를 사용했다.
 
 ## 현재 검증
 
-- 전체 Python test suite: `182/182` 통과
+- 전체 Python test suite: `188/188` 통과
+- npm 실행기 test suite: `3/3` 통과
 - Setup Skill `quick_validate`: 통과
+- Claude Code `2.1.212`와 `2.1.220`의 strict Marketplace validation: 통과
+- 격리된 Claude Marketplace add/install, cached plugin Setup, Claude `Write`
+  hook deny replay: 통과
 - trusted-hook denial canary와 Harness audit 경로: test suite에서 통과
 - 초소형 버그 Stable completion:
   `COMPLETE-59504db31a5656bdafb4`
@@ -506,6 +514,10 @@ payload를 사용했다.
   `COMPLETE-30003fd8f5f8d3820f60`
 - 최종 untouched R&D completion:
   `COMPLETE-8b73a5e525e011b848e0`
+
+실제 Claude 계정으로 실행한 provider-attested canary는 별도 통과가
+필요하다. manifest validation과 수동 hook replay를 그 증거로 대체하지
+않는다.
 
 `benchmarks/fixtures/applied-vs-research.jsonl`은 scoring engine용 synthetic
 fixture다. 실제 A/B 관찰로 오해하지 않는다.
@@ -526,6 +538,10 @@ fixture다. 실제 A/B 관찰로 오해하지 않는다.
   모델 교체 전에 context, tool, permission, verification 환경을 개선하기
 - [Codex Hooks 공식 문서](https://learn.chatgpt.com/docs/hooks): provider
   event, canonical tool name, trust, allow/deny 계약
+- [Claude Code Hooks 공식 문서](https://code.claude.com/docs/en/hooks):
+  project hook schema, provider-native tool 입력, deny 계약
+- [Claude Code Marketplace 공식 문서](https://code.claude.com/docs/en/plugin-marketplaces):
+  cache 격리, manifest 검증, 설치·업데이트 계약
 
 도구 자체를 필수 dependency로 채택한 것이 아니다. 철학을 작은
 repo-native broker와 Gate에 구현했다.

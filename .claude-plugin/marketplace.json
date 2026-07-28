@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "mrbaeksang",
+  "owner": {
+    "name": "Mrbaeksang",
+    "url": "https://github.com/Mrbaeksang"
+  },
+  "description": "Evidence-gated engineering workflows for coding agents.",
+  "plugins": [
+    {
+      "name": "setup-engineering-harness",
+      "source": "./skills/setup-engineering-harness",
+      "description": "Set up a repository so one coding AI asks, researches, implements, and verifies with evidence.",
+      "category": "engineering",
+      "keywords": [
+        "agent-skills",
+        "claude-code",
+        "evidence-gated",
+        "engineering",
+        "verification"
+      ]
+    }
+  ]
+}
