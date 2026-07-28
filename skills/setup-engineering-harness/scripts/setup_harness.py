@@ -28,7 +28,7 @@ PROJECT_ASSET_ROOT = ASSET_ROOT / "harness"
 HOST_ASSET_ROOT = ASSET_ROOT / "runtime"
 HARNESS_DIR = ".agent-harness"
 MANIFEST_RELATIVE = f"{HARNESS_DIR}/manifest.json"
-HOOKS_RELATIVE = ".codex/hooks.json"
+DEFAULT_PROVIDER_ID = "codex"
 MUTABLE_HOST_STATE_FILES = (
     "completion-receipt.json",
     "gate-state.lock",
@@ -169,6 +169,7 @@ PROTECTED_GLOBS = [
     "**/dist-packages",
     "**/dist-packages/**",
     ".codex/hooks.json",
+    ".claude/settings.json",
     "package.json",
     "**/package.json",
     "package-lock.json",
@@ -288,6 +289,59 @@ class SetupPlan:
     preserved: list[str]
     conflicts: list[str]
     manifest: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class ProviderSpec:
+    id: str
+    display_name: str
+    binary_name: str
+    bridge_relative: str
+    hooks_relative: str
+    hook_matcher: str
+
+
+PROVIDERS = {
+    "codex": ProviderSpec(
+        id="codex",
+        display_name="Codex",
+        binary_name="codex",
+        bridge_relative="AGENTS.md",
+        hooks_relative=".codex/hooks.json",
+        hook_matcher=".*",
+    ),
+    "claude-code": ProviderSpec(
+        id="claude-code",
+        display_name="Claude Code",
+        binary_name="claude",
+        bridge_relative="CLAUDE.md",
+        hooks_relative=".claude/settings.json",
+        hook_matcher="*",
+    ),
+}
+
+
+def provider_spec(provider_id: str) -> ProviderSpec:
+    try:
+        return PROVIDERS[provider_id]
+    except KeyError as error:
+        raise ValueError(f"unsupported provider: {safe_text(provider_id)}") from error
+
+
+def manifest_provider_id(manifest: dict[str, Any] | None) -> str | None:
+    if not manifest:
+        return None
+    provider = manifest.get("provider_hooks")
+    if not isinstance(provider, dict):
+        return None
+    configured = provider.get("provider")
+    if isinstance(configured, str) and configured in PROVIDERS:
+        return configured
+    path = provider.get("path")
+    matches = [
+        spec.id for spec in PROVIDERS.values() if spec.hooks_relative == path
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def sha256(content: bytes) -> str:
@@ -451,7 +505,7 @@ def inspect_repository(root: Path) -> dict[str, Any]:
     for name in INSTRUCTION_FILES:
         candidate = project_path(root, name)
         if candidate.is_file() and not candidate.is_symlink():
-            if name == "AGENTS.md":
+            if name in {"AGENTS.md", "CLAUDE.md"}:
                 content = read_small(candidate, 2 * 1024 * 1024)
                 if content is not None:
                     start = BRIDGE_START.encode()
@@ -704,7 +758,7 @@ def initial_gate_state(root: Path, project_id: str, profile: dict[str, Any]) -> 
 
 
 def initial_setup_status(
-    root: Path, project_id: str, broker_digest: str
+    root: Path, project_id: str, broker_digest: str, provider: ProviderSpec
 ) -> bytes:
     return json_bytes(
         {
@@ -712,6 +766,7 @@ def initial_setup_status(
             "hookTrustVerified": False,
             "projectId": project_id,
             "projectRoot": str(root),
+            "providerId": provider.id,
             "providerBinary": None,
             "providerBinarySha256": None,
             "providerReceipt": None,
@@ -727,7 +782,11 @@ def initial_setup_status(
 
 
 def expected_hooks(
-    root: Path, host_directory: Path, state_path: Path, status_path: Path
+    root: Path,
+    host_directory: Path,
+    state_path: Path,
+    status_path: Path,
+    provider: ProviderSpec,
 ) -> list[tuple[str, str, dict[str, Any]]]:
     python_executable = shlex.quote(str(Path(sys.executable).resolve(strict=True)))
     gate = host_directory / "runtime" / "pretool_gate.py"
@@ -769,7 +828,7 @@ def expected_hooks(
                         "type": "command",
                     }
                 ],
-                "matcher": ".*",
+                "matcher": provider.hook_matcher,
             },
         ),
         (
@@ -905,10 +964,12 @@ def bridge_analysis(
     root: Path,
     previous: dict[str, Any] | None,
     command: str,
+    provider: ProviderSpec,
 ) -> tuple[Mutation | None, Mutation | None, dict[str, Any], list[str]]:
-    path = root / "AGENTS.md"
+    bridge_relative = provider.bridge_relative
+    path = project_path(root, bridge_relative)
     issues: list[str] = []
-    issue = path_issue(root, "AGENTS.md")
+    issue = path_issue(root, bridge_relative)
     if issue:
         return None, None, {}, [issue]
     old_block: dict[str, Any] = {}
@@ -923,12 +984,18 @@ def bridge_analysis(
             **framing,
             "end": BRIDGE_END,
             "name": "engineering-harness-bridge",
-            "path": "AGENTS.md",
+            "path": bridge_relative,
             "sha256": sha256(BRIDGE_BYTES),
             "start": BRIDGE_START,
         }
         return (
-            Mutation(path, "AGENTS.md", BRIDGE_BYTES + b"\n", 0o644, "created Managed Bridge"),
+            Mutation(
+                path,
+                bridge_relative,
+                BRIDGE_BYTES + b"\n",
+                0o644,
+                "created Managed Bridge",
+            ),
             None,
             block,
             issues,
@@ -937,7 +1004,7 @@ def bridge_analysis(
     try:
         content = path.read_bytes()
     except OSError as error:
-        return None, None, {}, [f"AGENTS.md: unreadable ({error})"]
+        return None, None, {}, [f"{bridge_relative}: unreadable ({error})"]
     start = BRIDGE_START.encode()
     end = BRIDGE_END.encode()
     if content.count(start) == 0 and content.count(end) == 0:
@@ -950,7 +1017,7 @@ def bridge_analysis(
             "end": BRIDGE_END,
             "leading_hex": leading.hex(),
             "name": "engineering-harness-bridge",
-            "path": "AGENTS.md",
+            "path": bridge_relative,
             "sha256": sha256(BRIDGE_BYTES),
             "start": BRIDGE_START,
             "trailing_hex": trailing.hex(),
@@ -958,7 +1025,7 @@ def bridge_analysis(
         return (
             Mutation(
                 path,
-                "AGENTS.md",
+                bridge_relative,
                 content + leading + BRIDGE_BYTES + trailing,
                 file_mode(path, 0o644),
                 "appended Managed Bridge",
@@ -968,7 +1035,9 @@ def bridge_analysis(
             issues,
         )
     if content.count(start) != 1 or content.count(end) != 1:
-        return None, None, {}, ["AGENTS.md: bridge markers are duplicated or unbalanced"]
+        return None, None, {}, [
+            f"{bridge_relative}: bridge markers are duplicated or unbalanced"
+        ]
     begin = content.index(start)
     finish = content.index(end, begin) + len(end)
     current = content[begin:finish]
@@ -981,7 +1050,7 @@ def bridge_analysis(
         **framing,
         "end": BRIDGE_END,
         "name": "engineering-harness-bridge",
-        "path": "AGENTS.md",
+        "path": bridge_relative,
         "sha256": sha256(BRIDGE_BYTES),
         "start": BRIDGE_START,
     }
@@ -990,14 +1059,14 @@ def bridge_analysis(
     previous_digest = old_block.get("sha256")
     if previous_digest == sha256(current) or command == "repair":
         backup = (
-            mutation_for_recovery(root, "AGENTS.md", content)
+            mutation_for_recovery(root, bridge_relative, content)
             if command == "repair" and previous_digest != sha256(current)
             else None
         )
         return (
             Mutation(
                 path,
-                "AGENTS.md",
+                bridge_relative,
                 content[:begin] + BRIDGE_BYTES + content[finish:],
                 file_mode(path, 0o644),
                 "repaired Managed Bridge" if command == "repair" else "updated Managed Bridge",
@@ -1007,23 +1076,25 @@ def bridge_analysis(
             issues,
         )
     return None, None, block, [
-        "AGENTS.md: managed bridge drift; review it, then run repair explicitly"
+        f"{bridge_relative}: managed bridge drift; review it, then run repair explicitly"
     ]
 
 
-def parse_hooks(path: Path) -> tuple[dict[str, Any], bytes | None, str | None]:
+def parse_hooks(
+    path: Path, hooks_relative: str
+) -> tuple[dict[str, Any], bytes | None, str | None]:
     if not path.exists():
         return {}, None, None
     try:
         raw = path.read_bytes()
         value = json.loads(raw.decode())
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        return {}, None, f"{HOOKS_RELATIVE}: invalid JSON ({error})"
+        return {}, None, f"{hooks_relative}: invalid JSON ({error})"
     if not isinstance(value, dict):
-        return {}, raw, f"{HOOKS_RELATIVE}: root must be an object"
+        return {}, raw, f"{hooks_relative}: root must be an object"
     hooks = value.get("hooks")
     if hooks is not None and not isinstance(hooks, dict):
-        return {}, raw, f"{HOOKS_RELATIVE}: hooks must be an object"
+        return {}, raw, f"{hooks_relative}: hooks must be an object"
     return value, raw, None
 
 
@@ -1032,18 +1103,20 @@ def hook_analysis(
     expected: list[tuple[str, str, dict[str, Any]]],
     previous: dict[str, Any] | None,
     command: str,
+    provider: ProviderSpec,
 ) -> tuple[Mutation | None, Mutation | None, bool, list[str]]:
-    path = project_path(root, HOOKS_RELATIVE)
-    issue = path_issue(root, HOOKS_RELATIVE)
+    hooks_relative = provider.hooks_relative
+    path = project_path(root, hooks_relative)
+    issue = path_issue(root, hooks_relative)
     if issue:
         return None, None, False, [issue]
-    data, raw, error = parse_hooks(path)
+    data, raw, error = parse_hooks(path, hooks_relative)
     if error:
         return None, None, False, [error]
     original_absent = raw is None
     hooks = data.setdefault("hooks", {})
     if not isinstance(hooks, dict):
-        return None, None, False, [f"{HOOKS_RELATIVE}: hooks must be an object"]
+        return None, None, False, [f"{hooks_relative}: hooks must be an object"]
     previous_digests = manifest_hook_digests(previous)
     changed = False
     drifted = False
@@ -1051,14 +1124,14 @@ def hook_analysis(
     for event, hook_id, desired in expected:
         entries = hooks.setdefault(event, [])
         if not isinstance(entries, list):
-            conflicts.append(f"{HOOKS_RELATIVE}: {event} must be an array")
+            conflicts.append(f"{hooks_relative}: {event} must be an array")
             continue
         matches = [index for index, entry in enumerate(entries) if hook_matches(entry, hook_id)]
         previous_digest = previous_digests.get((event, hook_id))
         if not matches:
             if previous_digest is not None and command != "repair":
                 conflicts.append(
-                    f"{HOOKS_RELATIVE}: managed {event} {hook_id} is missing; run repair"
+                    f"{hooks_relative}: managed {event} {hook_id} is missing; run repair"
                 )
             else:
                 entries.append(desired)
@@ -1068,7 +1141,7 @@ def hook_analysis(
         if len(matches) > 1:
             if command != "repair":
                 conflicts.append(
-                    f"{HOOKS_RELATIVE}: duplicate managed {event} {hook_id} entries"
+                    f"{hooks_relative}: duplicate managed {event} {hook_id} entries"
                 )
                 continue
             first = matches[0]
@@ -1092,12 +1165,12 @@ def hook_analysis(
             drifted = drifted or previous_digest != current_digest
         else:
             conflicts.append(
-                f"{HOOKS_RELATIVE}: managed {event} {hook_id} drift; run repair"
+                f"{hooks_relative}: managed {event} {hook_id} drift; run repair"
             )
     if conflicts:
         return None, None, original_absent, conflicts
     backup = (
-        mutation_for_recovery(root, HOOKS_RELATIVE, raw or b"")
+        mutation_for_recovery(root, hooks_relative, raw or b"")
         if command == "repair" and drifted
         else None
     )
@@ -1106,7 +1179,7 @@ def hook_analysis(
     return (
         Mutation(
             path,
-            HOOKS_RELATIVE,
+            hooks_relative,
             json_bytes(data),
             file_mode(path, 0o644),
             "merged managed provider hooks",
@@ -1214,6 +1287,7 @@ def build_manifest(
     hooks_created: bool,
     state_path: Path,
     status_path: Path,
+    provider: ProviderSpec,
 ) -> dict[str, Any]:
     return seal_manifest(
         {
@@ -1251,7 +1325,8 @@ def build_manifest(
                     }
                     for event, hook_id, entry in hooks
                 ],
-                "path": HOOKS_RELATIVE,
+                "path": provider.hooks_relative,
+                "provider": provider.id,
             },
             "schema_version": SCHEMA_VERSION,
             "seeded_files": [
@@ -1266,7 +1341,11 @@ def build_manifest(
     )
 
 
-def plan_setup(root: Path, command: str) -> SetupPlan:
+def plan_setup(
+    root: Path,
+    command: str,
+    provider: ProviderSpec = PROVIDERS[DEFAULT_PROVIDER_ID],
+) -> SetupPlan:
     profile = inspect_repository(root)
     mutations: list[Mutation] = []
     preserved: list[str] = []
@@ -1290,14 +1369,30 @@ def plan_setup(root: Path, command: str) -> SetupPlan:
             if backup:
                 mutations.append(backup)
             preserved.append(backup.label if backup else MANIFEST_RELATIVE)
+        installed_provider = manifest_provider_id(previous)
+        if previous is not None and installed_provider != provider.id:
+            return SetupPlan(
+                root,
+                profile,
+                [],
+                preserved,
+                [
+                    f"{MANIFEST_RELATIVE}: installed provider is "
+                    f"{installed_provider or 'unknown'}, requested {provider.id}; "
+                    "uninstall before changing provider"
+                ],
+                previous,
+            )
 
     project_id, host_directory, state_path, status_path = state_locations(root)
     project_files = desired_project_files(root, profile)
     host_files = desired_host_files(host_directory)
-    expected = expected_hooks(root, host_directory, state_path, status_path)
+    expected = expected_hooks(
+        root, host_directory, state_path, status_path, provider
+    )
 
     bridge_write, bridge_backup, bridge, bridge_issues = bridge_analysis(
-        root, previous, command
+        root, previous, command, provider
     )
     conflicts.extend(bridge_issues)
     if bridge_backup:
@@ -1307,7 +1402,7 @@ def plan_setup(root: Path, command: str) -> SetupPlan:
         mutations.append(bridge_write)
 
     hook_write, hook_backup, hook_created, hook_issues = hook_analysis(
-        root, expected, previous, command
+        root, expected, previous, command, provider
     )
     conflicts.extend(hook_issues)
     if hook_backup:
@@ -1367,7 +1462,9 @@ def plan_setup(root: Path, command: str) -> SetupPlan:
         item for item in project_files if item.label == f"{HARNESS_DIR}/bin/read_context.py"
     )
     state_content = initial_gate_state(root, project_id, profile)
-    status_content = initial_setup_status(root, project_id, sha256(broker.content))
+    status_content = initial_setup_status(
+        root, project_id, sha256(broker.content), provider
+    )
     for path, label, content, validator in (
         (state_path, "host:gate-state.json", state_content, valid_gate_state),
         (status_path, "host:setup-status.json", status_content, valid_setup_status),
@@ -1396,6 +1493,40 @@ def plan_setup(root: Path, command: str) -> SetupPlan:
                 mutations.append(
                     Mutation(path, label, path.read_bytes(), 0o600, "secured host state mode")
                 )
+            elif path == status_path:
+                current_status = json.loads(path.read_text(encoding="utf-8"))
+                current_provider = current_status.get("providerId")
+                if current_provider not in {None, provider.id}:
+                    conflicts.append(
+                        f"{label}: provider belongs to {current_provider}, "
+                        f"requested {provider.id}"
+                    )
+                elif current_provider is None:
+                    current_status.update(
+                        {
+                            "hookTrustVerified": False,
+                            "providerBinary": None,
+                            "providerBinarySha256": None,
+                            "providerId": provider.id,
+                            "providerReceipt": None,
+                            "providerVersion": None,
+                            "verificationEvidenceSha256": None,
+                            "verifiedAt": None,
+                            "verifiedManifestChecksum": None,
+                            "writeCanaryVerified": False,
+                        }
+                    )
+                    mutations.append(
+                        Mutation(
+                            path,
+                            label,
+                            json_bytes(current_status),
+                            0o600,
+                            "bound host status to provider",
+                        )
+                    )
+                else:
+                    preserved.append(label)
             else:
                 preserved.append(label)
 
@@ -1410,6 +1541,7 @@ def plan_setup(root: Path, command: str) -> SetupPlan:
         else bool(previous.get("provider_hooks", {}).get("file_created", False)),
         state_path,
         status_path,
+        provider,
     )
     content = json_bytes(manifest)
     if not manifest_path.exists() or manifest_path.read_bytes() != content:
@@ -1531,7 +1663,9 @@ def run_audit(root: Path, *, as_json: bool = False) -> int:
     return subprocess.run(command, check=False).returncode
 
 
-def _provider_canary_denied(stdout: str, stderr: str) -> bool:
+def _provider_canary_denied(
+    provider: ProviderSpec, stdout: str, stderr: str
+) -> bool:
     for line in stdout.splitlines():
         try:
             event = json.loads(line)
@@ -1542,22 +1676,42 @@ def _provider_canary_denied(stdout: str, stderr: str) -> bool:
             and event.get("type") == "hook.completed"
             and event.get("hook") == "PreToolUse"
             and event.get("permissionDecision") == "deny"
-            and event.get("tool_name") in {"apply_patch", "ApplyPatch"}
+            and event.get("tool_name")
+            in {"apply_patch", "ApplyPatch", "Write", "write"}
             and isinstance(event.get("tool_call_id"), str)
             and event["tool_call_id"]
         ):
             return True
-    lowered = stderr.lower()
+        if isinstance(event, dict):
+            serialized = json.dumps(event, sort_keys=True).lower()
+            if (
+                "pretooluse" in serialized
+                and "deny" in serialized
+                and (
+                    "writing is locked" in serialized
+                    or PRETOOL_HOOK_ID in serialized
+                )
+            ):
+                return True
+    lowered = (stdout + "\n" + stderr).lower()
     return (
         "pretooluse hook" in lowered
         and "writing is locked" in lowered
         and ("tool call blocked" in lowered or "command blocked" in lowered)
+    ) or (
+        provider.id == "claude-code"
+        and "pretooluse" in lowered
+        and "writing is locked" in lowered
+        and "deny" in lowered
     )
 
 
 def _provider_environment(state_home: Path) -> dict[str, str]:
     allowed = {
         "ALL_PROXY",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CONFIG_DIR",
         "CODEX_HOME",
         "HOME",
         "HTTPS_PROXY",
@@ -1587,10 +1741,11 @@ def _provider_environment(state_home: Path) -> dict[str, str]:
 def verify_provider(
     root: Path,
     *,
+    provider: ProviderSpec | None = None,
     run_process: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     find_binary: Callable[[str], str | None] = shutil.which,
 ) -> int:
-    """Verify normal Codex hook dispatch without bypassing persisted trust."""
+    """Verify normal provider hook dispatch without bypassing persisted trust."""
 
     checker = PROJECT_ASSET_ROOT / "checks" / "audit.py"
     inspected = run_process(
@@ -1615,6 +1770,18 @@ def verify_provider(
             file=sys.stderr,
         )
         return 2
+    installed_provider_id = manifest_provider_id(manifest)
+    if installed_provider_id is None:
+        print("Provider verification: provider identity is invalid", file=sys.stderr)
+        return 2
+    installed_provider = provider_spec(installed_provider_id)
+    if provider is not None and provider.id != installed_provider.id:
+        print(
+            "Provider verification: requested provider does not match installation",
+            file=sys.stderr,
+        )
+        return 2
+    provider = installed_provider
     host = manifest.get("host_runtime")
     if not isinstance(host, dict):
         print("Provider verification: host runtime is missing", file=sys.stderr)
@@ -1626,20 +1793,27 @@ def verify_provider(
         if (
             not isinstance(status, dict)
             or status.get("projectRoot") != str(root)
+            or status.get("providerId") not in {None, provider.id}
         ):
             raise ValueError("setup status belongs to another Project")
     except (OSError, KeyError, UnicodeError, json.JSONDecodeError, ValueError) as error:
         print(f"Provider verification: host state is invalid ({error})", file=sys.stderr)
         return 2
 
-    binary_value = find_binary("codex")
+    binary_value = find_binary(provider.binary_name)
     if not binary_value:
-        print("Provider verification: Codex CLI is not installed", file=sys.stderr)
+        print(
+            f"Provider verification: {provider.display_name} CLI is not installed",
+            file=sys.stderr,
+        )
         return 3
     try:
         binary = str(Path(binary_value).resolve(strict=True))
     except OSError as error:
-        print(f"Provider verification: Codex CLI is unsafe ({error})", file=sys.stderr)
+        print(
+            f"Provider verification: {provider.display_name} CLI is unsafe ({error})",
+            file=sys.stderr,
+        )
         return 2
 
     target = root / ".engineering-harness-provider-canary"
@@ -1666,11 +1840,15 @@ def verify_provider(
             snapshots[path] = (False, b"", 0o600)
 
     environment = _provider_environment(state_directory)
+    tool_instruction = (
+        "call apply_patch to add"
+        if provider.id == "codex"
+        else "call Write to create"
+    )
     prompt = (
         "Provider-hook canary. Do not inspect the repository and do not use "
-        "shell commands. As your first and only tool action, call apply_patch "
-        "to add `.engineering-harness-provider-canary` containing `blocked`. "
-        "Then stop."
+        f"shell commands. As your first and only tool action, {tool_instruction} "
+        "`.engineering-harness-provider-canary` containing `blocked`. Then stop."
     )
     result: subprocess.CompletedProcess[str] | None = None
     version = "unknown"
@@ -1688,8 +1866,8 @@ def verify_provider(
         )[:200]
         if version_result.returncode == 0 and observed_version:
             version = observed_version
-            result = run_process(
-                [
+            if provider.id == "codex":
+                command = [
                     binary,
                     "exec",
                     "--json",
@@ -1703,10 +1881,30 @@ def verify_provider(
                     "--config",
                     'shell_environment_policy.inherit="none"',
                     "-",
-                ],
+                ]
+                process_input: str | None = prompt
+            else:
+                command = [
+                    binary,
+                    "--print",
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                    "--include-hook-events",
+                    "--tools",
+                    "Write",
+                    "--allowedTools",
+                    "Write",
+                    "--permission-mode",
+                    "acceptEdits",
+                    prompt,
+                ]
+                process_input = None
+            result = run_process(
+                command,
                 cwd=root,
                 env=environment,
-                input=prompt,
+                input=process_input,
                 capture_output=True,
                 check=False,
                 text=True,
@@ -1714,11 +1912,14 @@ def verify_provider(
             )
         else:
             print(
-                "Provider verification: Codex version is unavailable",
+                f"Provider verification: {provider.display_name} version is unavailable",
                 file=sys.stderr,
             )
     except subprocess.TimeoutExpired:
-        print("Provider verification: Codex canary timed out", file=sys.stderr)
+        print(
+            f"Provider verification: {provider.display_name} canary timed out",
+            file=sys.stderr,
+        )
     finally:
         for path, (existed, content, mode) in snapshots.items():
             try:
@@ -1750,12 +1951,15 @@ def verify_provider(
     if (
         result is None
         or result.returncode != 0
-        or not _provider_canary_denied(result.stdout or "", result.stderr or "")
+        or not _provider_canary_denied(
+            provider, result.stdout or "", result.stderr or ""
+        )
     ):
         print("Provider verification: INCOMPLETE", file=sys.stderr)
         print(
-            "- Open Codex in this Project, run /hooks, review and trust the "
-            "two Engineering Harness hooks, then rerun verify-provider.",
+            f"- Open {provider.display_name} in this Project, run /hooks, "
+            "review and trust the two Engineering Harness hooks, then rerun "
+            "verify-provider.",
             file=sys.stderr,
         )
         return 3
@@ -1763,6 +1967,7 @@ def verify_provider(
     verified_at = datetime.now(timezone.utc).isoformat()
     evidence = {
         "manifestChecksum": manifest["manifest_checksum"],
+        "providerId": provider.id,
         "providerBinary": binary,
         "providerBinarySha256": sha256(Path(binary).read_bytes()),
         "providerVersion": version,
@@ -1773,6 +1978,7 @@ def verify_provider(
     status.update(
         {
             "hookTrustVerified": True,
+            "providerId": provider.id,
             "providerBinary": binary,
             "providerBinarySha256": evidence["providerBinarySha256"],
             "providerReceipt": evidence,
@@ -1839,8 +2045,10 @@ def print_plan(plan: SetupPlan, *, as_json: bool = False) -> None:
             print(f"- {safe_text(item)}")
 
 
-def execute_setup(root: Path, command: str) -> int:
-    plan = plan_setup(root, command)
+def execute_setup(
+    root: Path, command: str, provider: ProviderSpec
+) -> int:
+    plan = plan_setup(root, command, provider)
     if plan.conflicts:
         print_plan(plan)
         return 2
@@ -1873,7 +2081,13 @@ def uninstall_bridge(
     if not isinstance(blocks, list) or len(blocks) != 1 or not isinstance(blocks[0], dict):
         return None, ["manifest managed bridge is malformed"]
     block = blocks[0]
-    path = root / "AGENTS.md"
+    bridge_relative = block.get("path")
+    if not isinstance(bridge_relative, str):
+        return None, ["manifest managed bridge path is malformed"]
+    try:
+        path = project_path(root, bridge_relative)
+    except ValueError as error:
+        return None, [f"manifest managed bridge path is unsafe ({error})"]
     try:
         content = path.read_bytes()
         start = str(block["start"]).encode()
@@ -1894,11 +2108,23 @@ def uninstall_bridge(
             raise ValueError("managed trailing framing drift")
         remaining = content[:remove_begin] + content[remove_finish:]
     except (OSError, KeyError, ValueError) as error:
-        return None, [f"AGENTS.md: {error}"]
+        return None, [f"{bridge_relative}: {error}"]
     if block.get("created_file") is True and not remaining:
-        return Mutation(path, "AGENTS.md", None, 0o644, "removed created bridge file"), []
+        return Mutation(
+            path,
+            bridge_relative,
+            None,
+            0o644,
+            "removed created bridge file",
+        ), []
     return (
-        Mutation(path, "AGENTS.md", remaining, file_mode(path, 0o644), "removed Managed Bridge"),
+        Mutation(
+            path,
+            bridge_relative,
+            remaining,
+            file_mode(path, 0o644),
+            "removed Managed Bridge",
+        ),
         [],
     )
 
@@ -1909,12 +2135,17 @@ def uninstall_hooks(
     provider = manifest.get("provider_hooks")
     if not isinstance(provider, dict):
         return None, ["manifest provider hooks are malformed"]
-    if provider.get("path") != HOOKS_RELATIVE:
+    installed_provider = manifest_provider_id(manifest)
+    if installed_provider is None:
+        return None, ["manifest provider identity is not installer-owned"]
+    spec = provider_spec(installed_provider)
+    hooks_relative = spec.hooks_relative
+    if provider.get("path") != hooks_relative:
         return None, ["manifest provider hook path is not installer-owned"]
-    path = project_path(root, HOOKS_RELATIVE)
-    data, raw, error = parse_hooks(path)
+    path = project_path(root, hooks_relative)
+    data, raw, error = parse_hooks(path, hooks_relative)
     if error or raw is None:
-        return None, [error or f"{HOOKS_RELATIVE}: missing"]
+        return None, [error or f"{hooks_relative}: missing"]
     specs = provider.get("managed_entries")
     if not isinstance(specs, list):
         return None, ["manifest managed hook list is malformed"]
@@ -1931,26 +2162,38 @@ def uninstall_hooks(
         return None, ["manifest managed hook identities are not installer-owned"]
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
-        return None, [f"{HOOKS_RELATIVE}: hooks are malformed"]
+        return None, [f"{hooks_relative}: hooks are malformed"]
     for spec in specs:
         if not isinstance(spec, dict):
             return None, ["manifest hook specification is malformed"]
         event, hook_id, expected = spec.get("event"), spec.get("id"), spec.get("sha256")
         entries = hooks.get(event)
         if not isinstance(event, str) or not isinstance(hook_id, str) or not isinstance(entries, list):
-            return None, [f"{HOOKS_RELATIVE}: managed hook event is malformed"]
+            return None, [f"{hooks_relative}: managed hook event is malformed"]
         matches = [item for item in entries if hook_matches(item, hook_id)]
         if len(matches) != 1 or canonical_digest(matches[0]) != expected:
-            return None, [f"{HOOKS_RELATIVE}: managed {event} {hook_id} drift"]
+            return None, [f"{hooks_relative}: managed {event} {hook_id} drift"]
         hooks[event] = [item for item in entries if not hook_matches(item, hook_id)]
         if not hooks[event]:
             del hooks[event]
     if not hooks:
         data.pop("hooks", None)
     if provider.get("file_created") is True and not data:
-        return Mutation(path, HOOKS_RELATIVE, None, 0o644, "removed created hooks file"), []
+        return Mutation(
+            path,
+            hooks_relative,
+            None,
+            0o644,
+            "removed created hooks file",
+        ), []
     return (
-        Mutation(path, HOOKS_RELATIVE, json_bytes(data), file_mode(path, 0o644), "removed hooks"),
+        Mutation(
+            path,
+            hooks_relative,
+            json_bytes(data),
+            file_mode(path, 0o644),
+            "removed hooks",
+        ),
         [],
     )
 
@@ -2126,6 +2369,7 @@ def execute_uninstall(root: Path) -> int:
         root / HARNESS_DIR / "runtime",
         root / HARNESS_DIR / "playbooks",
         root / ".codex",
+        root / ".claude",
     ):
         try:
             directory.rmdir()
@@ -2163,6 +2407,14 @@ def parse_args() -> argparse.Namespace:
         default="plan",
     )
     parser.add_argument("--repo", type=Path, default=Path.cwd())
+    parser.add_argument(
+        "--provider",
+        choices=tuple(sorted(PROVIDERS)),
+        help=(
+            "coding-agent provider to configure; defaults to codex for "
+            "plan/install/repair"
+        ),
+    )
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
@@ -2177,8 +2429,11 @@ def main() -> int:
         print("error: refusing to install into this Skill directory", file=sys.stderr)
         return 2
     try:
+        selected_provider = provider_spec(
+            args.provider or DEFAULT_PROVIDER_ID
+        )
         if args.command == "plan":
-            plan = plan_setup(root, "install")
+            plan = plan_setup(root, "install", selected_provider)
             print_plan(plan, as_json=args.json)
             return 2 if plan.conflicts else 0
         if args.command == "audit":
@@ -2187,10 +2442,15 @@ def main() -> int:
             if args.json:
                 print("error: --json is not supported for verify-provider", file=sys.stderr)
                 return 2
-            return verify_provider(root)
+            return verify_provider(
+                root,
+                provider=provider_spec(args.provider)
+                if args.provider
+                else None,
+            )
         if args.command == "uninstall":
             return execute_uninstall(root)
-        return execute_setup(root, args.command)
+        return execute_setup(root, args.command, selected_provider)
     except (OSError, ValueError) as error:
         print(f"error: {safe_text(error)}", file=sys.stderr)
         return 2

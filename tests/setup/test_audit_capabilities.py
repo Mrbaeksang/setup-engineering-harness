@@ -121,6 +121,7 @@ class ProviderReceiptFreshnessTests(unittest.TestCase):
         digest = hashlib.sha256(self.binary.read_bytes()).hexdigest()
         receipt = {
             "manifestChecksum": "manifest-digest",
+            "providerId": "codex",
             "providerBinary": str(self.binary),
             "providerBinarySha256": digest,
             "providerVersion": "codex-cli 1.2.3",
@@ -129,6 +130,7 @@ class ProviderReceiptFreshnessTests(unittest.TestCase):
             "verifiedAt": verified_at,
         }
         return {
+            "providerId": "codex",
             "providerBinary": str(self.binary),
             "providerBinarySha256": digest,
             "providerReceipt": receipt,
@@ -145,9 +147,13 @@ class ProviderReceiptFreshnessTests(unittest.TestCase):
             "which",
             return_value=str(self.binary),
         ):
-            self.assertTrue(self.audit.provider_receipt_is_current(status))
+            self.assertTrue(
+                self.audit.provider_receipt_is_current(status, "codex")
+            )
             self.binary.write_bytes(b"provider-v2")
-            self.assertFalse(self.audit.provider_receipt_is_current(status))
+            self.assertFalse(
+                self.audit.provider_receipt_is_current(status, "codex")
+            )
 
     def test_expired_receipt_and_path_drift_are_rejected(self) -> None:
         status = self.status_at(
@@ -160,7 +166,9 @@ class ProviderReceiptFreshnessTests(unittest.TestCase):
             "which",
             return_value=str(self.binary),
         ):
-            self.assertFalse(self.audit.provider_receipt_is_current(status))
+            self.assertFalse(
+                self.audit.provider_receipt_is_current(status, "codex")
+            )
 
         status = self.status_at(datetime.now(timezone.utc))
         with mock.patch.object(
@@ -168,7 +176,9 @@ class ProviderReceiptFreshnessTests(unittest.TestCase):
             "which",
             return_value=str(other),
         ):
-            self.assertFalse(self.audit.provider_receipt_is_current(status))
+            self.assertFalse(
+                self.audit.provider_receipt_is_current(status, "codex")
+            )
 
 
 if __name__ == "__main__":

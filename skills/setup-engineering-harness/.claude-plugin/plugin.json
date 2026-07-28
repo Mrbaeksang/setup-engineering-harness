@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "setup-engineering-harness",
+  "displayName": "Setup Engineering Harness",
+  "version": "0.1.0",
+  "description": "Set up a repository so one coding AI follows an evidence-gated engineering workflow.",
+  "author": {
+    "name": "Mrbaeksang",
+    "url": "https://github.com/Mrbaeksang"
+  },
+  "homepage": "https://github.com/Mrbaeksang/setup-engineering-harness",
+  "repository": "https://github.com/Mrbaeksang/setup-engineering-harness",
+  "license": "Apache-2.0",
+  "keywords": [
+    "agent-skills",
+    "claude-code",
+    "evidence-gated",
+    "engineering",
+    "verification"
+  ],
+  "skills": [
+    "./"
+  ]
+}

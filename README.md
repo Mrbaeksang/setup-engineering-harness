@@ -18,18 +18,20 @@ using:
 - durable documentation is canonical and updated, not accumulated as meeting
   notes or speculative roadmaps.
 
-The current implementation targets Codex project hooks. It is an R&D-quality
-prototype, not a claim of statistically validated production readiness.
+The current implementation supports Codex and Claude Code project hooks. It is
+an R&D-quality prototype, not a claim of statistically validated production
+readiness.
 
 ## What Setup installs
 
-The installer preserves existing repository instructions and adds a thin
-`AGENTS.md` bridge. Detailed behavior lives in task-routed Playbooks under
+The installer preserves existing repository instructions and adds one thin
+provider-native bridge. Detailed behavior lives in task-routed Playbooks under
 `.agent-harness/`.
 
 ```text
-AGENTS.md                         thin managed bridge
-.codex/hooks.json                 merged UserPromptSubmit and PreToolUse hooks
+AGENTS.md or CLAUDE.md            thin managed bridge
+.codex/hooks.json or
+.claude/settings.json             merged UserPromptSubmit and PreToolUse hooks
 .agent-harness/
   config.json                     user-owned policy
   local.md                        user-owned local constraints
@@ -47,8 +49,26 @@ transient receipts are not added to Git.
 
 ## Install
 
-The current supported enforcement target is Codex. Install the Setup skill
-globally from GitHub with the open `skills` CLI:
+Choose one entrypoint. All three use the same versioned Skill and installer.
+
+### npm executable
+
+Run without permanently installing a package:
+
+```bash
+npx setup-engineering-harness@latest plan \
+  --provider codex --repo /path/to/project
+
+npx setup-engineering-harness@latest install \
+  --provider codex --repo /path/to/project
+```
+
+Use `--provider claude-code` for Claude Code. `plan` is read-only; `install`
+changes only the displayed scope.
+
+### Agent Skill
+
+Install globally into Codex with the open `skills` CLI:
 
 ```bash
 npx skills@latest add Mrbaeksang/setup-engineering-harness \
@@ -56,26 +76,37 @@ npx skills@latest add Mrbaeksang/setup-engineering-harness \
   -a codex -g -y
 ```
 
-No npm package from this repository is installed. The command copies the
-versioned skill from GitHub into Codex's skill directory.
-
 Open Codex in the repository you want to configure and invoke:
 
 ```text
 $setup-engineering-harness
 ```
 
+The `skills` command copies the versioned Skill from GitHub into the selected
+agent's skill directory. It does not install this repository's npm executable.
+
+### Claude Code Marketplace
+
+Register this repository as a marketplace and install its managed plugin:
+
+```bash
+claude plugin marketplace add Mrbaeksang/setup-engineering-harness
+claude plugin install setup-engineering-harness@mrbaeksang
+```
+
+Restart Claude Code or run `/reload-plugins`, then invoke:
+
+```text
+/setup-engineering-harness:setup-engineering-harness
+```
+
 The skill first shows a read-only repository profile, unresolved decisions, and
 the exact planned changes. One approval covers that scope; it then installs,
 runs the real-provider canary, and audits the result.
 
-The Agent Skill format can also be copied into Claude Code, but the current
-mechanical enforcement adapter targets Codex project hooks. This repository
-therefore does not advertise a Claude Marketplace install as fully supported.
-
-Requirements after skill installation: Python 3.12, Git, Codex CLI, and a
-supported local isolation mechanism for managed verification (`bubblewrap` on
-Linux/WSL or `sandbox-exec` on macOS).
+Requirements after installation: Python 3.12, Git, the selected provider CLI,
+and a supported local isolation mechanism for managed verification
+(`bubblewrap` on Linux/WSL or `sandbox-exec` on macOS).
 
 ## Run from a clone
 
@@ -84,17 +115,18 @@ installer directly:
 
 ```bash
 python3 skills/setup-engineering-harness/scripts/setup_harness.py \
-  plan --repo /path/to/project
+  plan --provider codex --repo /path/to/project
 
 python3 skills/setup-engineering-harness/scripts/setup_harness.py \
-  install --repo /path/to/project
+  install --provider codex --repo /path/to/project
 ```
 
-Then review and trust the exact project hook definitions in Codex and run:
+Then review and trust the exact project hook definitions in the selected
+provider and run:
 
 ```bash
 python3 skills/setup-engineering-harness/scripts/setup_harness.py \
-  verify-provider --repo /path/to/project
+  verify-provider --provider codex --repo /path/to/project
 
 python3 skills/setup-engineering-harness/scripts/setup_harness.py \
   audit --repo /path/to/project
@@ -128,8 +160,8 @@ screens and their limitations are recorded in the canonical
 - The installed provider adapter is Codex-specific.
 - Clean-context behavior screens currently have one run per arm, so findings
   are directional rather than statistically significant.
-- A live Codex provider canary must pass on the user's machine; a simulated hook
-  replay is not equivalent.
+- A live canary for the installed provider must pass on the user's machine; a
+  simulated hook replay is not equivalent.
 
 ## License
 
