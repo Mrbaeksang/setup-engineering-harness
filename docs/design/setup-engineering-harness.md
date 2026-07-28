@@ -501,7 +501,7 @@ payload를 사용했다.
 
 ## 현재 검증
 
-- 전체 Python test suite: `187/187` 통과
+- 전체 Python test suite: `188/188` 통과
 - npm 실행기 test suite: `3/3` 통과
 - Setup Skill `quick_validate`: 통과
 - Claude Code `2.1.212`와 `2.1.220`의 strict Marketplace validation: 통과

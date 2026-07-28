@@ -467,6 +467,7 @@ def _linux_readable_runtime_paths(
         for marker, depth in (
             (".nvm", 4),
             ("fnm", 3),
+            ("hostedtoolcache", 3),
             (".pyenv", 3),
             (".rustup", 3),
         ):
