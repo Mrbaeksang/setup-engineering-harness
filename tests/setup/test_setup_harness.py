@@ -32,7 +32,7 @@ class SetupHarnessTest(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory(prefix="engineering-harness-test-")
         self.addCleanup(temporary.cleanup)
-        self.base = Path(temporary.name)
+        self.base = Path(temporary.name).resolve()
         self.repo = self.base / "project"
         self.repo.mkdir()
         self.state_home = self.base / "state"
@@ -757,7 +757,7 @@ class SetupHarnessTest(unittest.TestCase):
                     command, 0, stdout="codex-cli 1.2.3\n", stderr=""
                 )
             self.assertNotIn("--dangerously-bypass-hook-trust", command)
-            self.assertIn("read-only", command)
+            self.assertIn("workspace-write", command)
             event = {
                 "type": "hook.completed",
                 "hook": "PreToolUse",
@@ -801,6 +801,21 @@ class SetupHarnessTest(unittest.TestCase):
         stale = self.run_setup("audit")
         self.assertEqual(stale.returncode, 3, stale.stdout + stale.stderr)
         self.assertIn("provider hook trust is not verified", stale.stdout)
+
+    def test_current_codex_pretool_denial_is_recognized(self) -> None:
+        module = load_installer()
+
+        self.assertTrue(
+            module._provider_canary_denied(
+                module.provider_spec("codex"),
+                "",
+                (
+                    "ERROR codex_core::tools::router: "
+                    "error=Command blocked by PreToolUse hook: "
+                    "Task phase 'discovery-locked' does not permit native writes."
+                ),
+            )
+        )
 
     def test_claude_provider_verification_uses_constrained_write_canary(self) -> None:
         self.seed_javascript_project()

@@ -546,7 +546,10 @@ def _install_resource_limits(*, process_limit: int | None = None) -> None:
         (MAX_CREATED_FILE_BYTES, MAX_CREATED_FILE_BYTES),
     )
     resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256))
-    if hasattr(resource, "RLIMIT_AS"):
+    # macOS reports RLIMIT_AS but rejects lowering its effectively-unbounded
+    # value on supported Python 3.14 builds. sandbox-exec already confines
+    # writes there; retain the address-space cap on platforms that implement it.
+    if hasattr(resource, "RLIMIT_AS") and platform.system() != "Darwin":
         _set_soft_resource_cap(resource.RLIMIT_AS, MAX_ADDRESS_SPACE_BYTES)
     if hasattr(resource, "RLIMIT_NPROC") and process_limit is not None:
         _set_soft_resource_cap(resource.RLIMIT_NPROC, process_limit)
@@ -659,26 +662,51 @@ def _run_isolated(
                 raise ValueError("macOS sandbox-exec is unavailable")
             escaped = str(isolation_root).replace("\\", "\\\\").replace('"', '\\"')
             read_roots = [
-                "/System",
-                "/Library",
-                "/usr",
-                "/bin",
-                "/sbin",
-                "/private/etc",
-                "/dev",
-                "/opt/homebrew",
-                escaped,
+                Path("/System"),
+                Path("/Library"),
+                Path("/usr"),
+                Path("/bin"),
+                Path("/sbin"),
+                Path("/private/etc"),
+                Path("/private/var/select"),
+                Path("/dev"),
+                Path("/opt/homebrew"),
+                isolation_root,
             ]
-            read_rules = "".join(
-                f'(allow file-read* (subpath "{value}"))'
+            existing_read_roots = [
+                value
                 for value in read_roots
-                if value == escaped or Path(value).exists()
+                if value == isolation_root or value.exists()
+            ]
+            readable_ancestors = sorted(
+                {
+                    parent
+                    for value in existing_read_roots
+                    for parent in value.parents
+                },
+                key=lambda value: (len(value.parts), str(value)),
+            )
+            ancestor_rules = "".join(
+                '(allow file-read* (literal "'
+                + str(value).replace("\\", "\\\\").replace('"', '\\"')
+                + '"))'
+                for value in readable_ancestors
+            )
+            read_rules = "".join(
+                '(allow file-read* (subpath "'
+                + str(value).replace("\\", "\\\\").replace('"', '\\"')
+                + '"))'
+                for value in existing_read_roots
             )
             profile = (
                 "(version 1)"
                 "(deny default)"
                 "(allow process*)"
                 "(allow sysctl-read)"
+                # Runtime symlinks and the disposable workspace need their
+                # ancestor directories for realpath traversal. Literal rules
+                # do not grant access to sibling files or descendants.
+                f"{ancestor_rules}"
                 f"{read_rules}"
                 f'(allow file-write* (subpath "{escaped}"))'
                 '(allow file-write-data (literal "/dev/null"))'

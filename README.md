@@ -104,7 +104,7 @@ The skill first shows a read-only repository profile, unresolved decisions, and
 the exact planned changes. One approval covers that scope; it then installs,
 runs the real-provider canary, and audits the result.
 
-Requirements after installation: Python 3.12, Git, the selected provider CLI,
+Requirements after installation: Python 3.12 or newer, Git, the selected provider CLI,
 and a supported local isolation mechanism for managed verification
 (`bubblewrap` on Linux/WSL or `sandbox-exec` on macOS).
 
@@ -162,6 +162,12 @@ screens and their limitations are recorded in the canonical
   are directional rather than statistically significant.
 - A live canary for the installed provider must pass on the user's machine; a
   simulated hook replay is not equivalent.
+
+The Codex canary deliberately uses a disposable `workspace-write` attempt at
+the reserved `.engineering-harness-provider-canary` path. This ensures the
+`PreToolUse` hook—not Codex's read-only sandbox—is what denies the write. The
+installer removes the reserved file and fails verification if the hook does not
+stop it.
 
 ## License
 

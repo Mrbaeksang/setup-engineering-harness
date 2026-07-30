@@ -42,7 +42,7 @@ Playbooks only when routed.
 6. Report `PASS`, `INCOMPLETE`, or `FAIL` exactly. `INCOMPLETE` means an enforcement prerequisite
    is still unverified.
 
-Install, repair, audit, and uninstall use Python 3.12 standard library only. They never run
+Install, repair, audit, and uninstall use the Python 3.12-or-newer standard library only. They never run
 Project commands, read secrets, change application code, or install packages. `verify-provider`
 runs only the reserved write-deny canary, restores Task state, and binds its receipt to the
 current manifest checksum.

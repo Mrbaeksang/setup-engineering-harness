@@ -49,7 +49,7 @@ class InstalledLeaseLifecycleTest(unittest.TestCase):
             prefix="engineering-harness-lifecycle-"
         )
         self.addCleanup(temporary.cleanup)
-        self.base = Path(temporary.name)
+        self.base = Path(temporary.name).resolve()
         self.repo = self.base / "project"
         self.repo.mkdir()
         (self.repo / "src").mkdir()

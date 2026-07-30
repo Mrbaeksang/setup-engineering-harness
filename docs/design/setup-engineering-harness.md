@@ -501,13 +501,17 @@ payload를 사용했다.
 
 ## 현재 검증
 
-- 전체 Python test suite: `188/188` 통과
+- 전체 Python test suite: `190/190` 통과
 - npm 실행기 test suite: `3/3` 통과
 - Setup Skill `quick_validate`: 통과
 - Claude Code `2.1.212`와 `2.1.220`의 strict Marketplace validation: 통과
 - 격리된 Claude Marketplace add/install, cached plugin Setup, Claude `Write`
   hook deny replay: 통과
 - trusted-hook denial canary와 Harness audit 경로: test suite에서 통과
+- macOS, Python `3.14.6`, Codex CLI `0.146.0` 실제 trusted-hook canary와
+  Harness audit: 통과
+- 같은 환경의 `sandbox-exec` 격리 snapshot에서 Vite production build:
+  통과
 - 초소형 버그 Stable completion:
   `COMPLETE-59504db31a5656bdafb4`
 - 초소형 버그 R&D completion:
@@ -515,8 +519,16 @@ payload를 사용했다.
 - 최종 untouched R&D completion:
   `COMPLETE-8b73a5e525e011b848e0`
 
-실제 Claude 계정으로 실행한 provider-attested canary는 별도 통과가
-필요하다. manifest validation과 수동 hook replay를 그 증거로 대체하지
+Codex provider canary는 `workspace-write` sandbox에서 예약된
+`.engineering-harness-provider-canary` 쓰기를 시도한다. `read-only`
+sandbox를 사용하면 provider hook보다 sandbox가 먼저 거부해 hook
+enforcement를 증명할 수 없기 때문이다. 현재 Codex CLI `0.146.0`의
+`Command blocked by PreToolUse hook` 출력 형식을 회귀 테스트로 고정한다.
+예약 파일이 실제로 생기면 즉시 제거하고 검증을 실패시킨다.
+
+각 설치 대상에서는 실제 provider 계정으로 provider-attested canary를
+별도 통과해야 한다. 위 Codex 실행은 이번 검증 환경의 증거이며, 다른
+설치의 manifest validation, trust bypass, 수동 hook replay를 대신하지
 않는다.
 
 `benchmarks/fixtures/applied-vs-research.jsonl`은 scoring engine용 synthetic

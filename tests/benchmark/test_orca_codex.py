@@ -18,7 +18,7 @@ class OrcaCodexExecutorTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(
             tempfile.mkdtemp(prefix="engineering-harness-live-")
-        )
+        ).resolve()
         self.workspace = self.root / "workspace"
         self.workspace.mkdir()
         self.binary = self.root / "orca-ide"

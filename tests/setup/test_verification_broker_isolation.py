@@ -463,6 +463,26 @@ class VerificationBrokerIsolationTests(unittest.TestCase):
         self.assertNotIn(resource.RLIMIT_NPROC, direct_limits)
         self.assertNotIn(resource.RLIMIT_NPROC, soft_limits)
 
+    def test_resource_limits_omit_unreliable_macos_address_space_cap(self) -> None:
+        namespace = runpy.run_path(str(BROKER_SOURCE))
+        install_limits = namespace["_install_resource_limits"]
+        soft_limits: list[int] = []
+        with (
+            patch.object(platform, "system", return_value="Darwin"),
+            patch.object(resource, "setrlimit"),
+            patch.dict(
+                install_limits.__globals__,
+                {
+                    "_set_soft_resource_cap": (
+                        lambda identifier, _cap: soft_limits.append(identifier)
+                    )
+                },
+            ),
+        ):
+            install_limits()
+
+        self.assertNotIn(resource.RLIMIT_AS, soft_limits)
+
     def test_symlink_cannot_relabel_ignored_secret_into_snapshot(self) -> None:
         secret = self.repo / ".env"
         secret.write_text("SECRET=must-not-copy\n", encoding="utf-8")

@@ -40,7 +40,7 @@ class InstalledGateConformanceTest(unittest.TestCase):
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory(prefix="installed-gate-conformance-")
         self.addCleanup(temporary.cleanup)
-        self.base = Path(temporary.name)
+        self.base = Path(temporary.name).resolve()
         self.repo = self.base / "project"
         self.repo.mkdir()
         (self.repo / "src").mkdir()

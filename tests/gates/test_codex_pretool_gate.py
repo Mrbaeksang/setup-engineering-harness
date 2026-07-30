@@ -41,7 +41,7 @@ class CodexAdapterTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name, "project")
+        self.root = Path(self.temp.name, "project").resolve()
         self.root.mkdir()
         Path(self.root, "src").mkdir()
         Path(self.root, "evidence.txt").write_bytes(EVIDENCE_CONTENT)

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -41,7 +41,7 @@ test("runs the bundled installer against another repository", () => {
   assert.equal(result.status, 0, result.stderr);
   const plan = JSON.parse(result.stdout);
   assert.equal(plan.status, "ready");
-  assert.equal(plan.target, repository);
+  assert.equal(plan.target, realpathSync(repository));
   assert.ok(
     plan.mutations.some(
       (mutation) => mutation.path === ".codex/hooks.json",

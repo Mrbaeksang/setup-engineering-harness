@@ -1696,8 +1696,11 @@ def _provider_canary_denied(
     lowered = (stdout + "\n" + stderr).lower()
     return (
         "pretooluse hook" in lowered
-        and "writing is locked" in lowered
-        and ("tool call blocked" in lowered or "command blocked" in lowered)
+        and (
+            "tool call blocked" in lowered
+            or "command blocked" in lowered
+            or "blocked by pretooluse hook" in lowered
+        )
     ) or (
         provider.id == "claude-code"
         and "pretooluse" in lowered
@@ -1875,7 +1878,7 @@ def verify_provider(
                     "--color",
                     "never",
                     "--sandbox",
-                    "read-only",
+                    "workspace-write",
                     "--cd",
                     str(root),
                     "--config",
@@ -1939,12 +1942,12 @@ def verify_provider(
             target.unlink()
         except OSError as error:
             print(
-                f"Provider verification: canary escaped read-only sandbox ({error})",
+                f"Provider verification: canary escaped provider hook ({error})",
                 file=sys.stderr,
             )
             return 2
         print(
-            "Provider verification: canary escaped read-only sandbox",
+            "Provider verification: canary escaped provider hook",
             file=sys.stderr,
         )
         return 2
