@@ -448,7 +448,7 @@ class SetupHarnessTest(unittest.TestCase):
         self.assertEqual(again.returncode, 3, again.stdout + again.stderr)
         self.assertEqual(self.snapshot(self.repo), before)
 
-    def test_adaptive_prompt_toggle_and_locked_hook_boundary(self) -> None:
+    def test_default_prompt_is_assistive_and_has_no_lifecycle_ceremony(self) -> None:
         self.seed_javascript_project()
         self.assertEqual(self.run_setup("install").returncode, 3)
         manifest = json.loads(
@@ -458,6 +458,113 @@ class SetupHarnessTest(unittest.TestCase):
         runtime_dir = Path(host["state_path"]).parent / "runtime"
         prompt_script = runtime_dir / "userprompt_context.py"
         gate_script = runtime_dir / "pretool_gate.py"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(prompt_script),
+                "--state",
+                host["state_path"],
+                "--repo",
+                str(self.repo),
+            ],
+            input=json.dumps(
+                {
+                    "user_prompt": (
+                        "Build the feature and choose a suitable current stack."
+                    )
+                }
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        context = json.loads(result.stdout)["hookSpecificOutput"][
+            "additionalContext"
+        ]
+        self.assertIn("batch independent questions", context)
+        self.assertIn("primary official sources", context)
+        self.assertIn("exact installed versions", context)
+        self.assertIn("Artifacts are on-demand", context)
+        self.assertNotIn("Task contract:", context)
+        self.assertNotIn("acceptanceHash", context)
+        self.assertNotIn("Lifecycle broker", context)
+        self.assertNotIn("Write Lease", context)
+
+        def gate(tool_name: str, tool_input: dict[str, object]) -> dict:
+            evaluated = subprocess.run(
+                [
+                    sys.executable,
+                    str(gate_script),
+                    "--state",
+                    host["state_path"],
+                    "--status",
+                    host["status_path"],
+                    "--repo",
+                    str(self.repo),
+                ],
+                input=json.dumps(
+                    {
+                        "hook_event_name": "PreToolUse",
+                        "tool_name": tool_name,
+                        "tool_input": tool_input,
+                        "cwd": str(self.repo),
+                    }
+                ),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(evaluated.returncode, 0, evaluated.stderr)
+            return json.loads(evaluated.stdout)["hookSpecificOutput"]
+
+        self.assertNotIn(
+            "permissionDecision",
+            gate(
+                "apply_patch",
+                {
+                    "patch": (
+                        "*** Begin Patch\n"
+                        "*** Add File: src/feature.js\n"
+                        "+export const feature = true;\n"
+                        "*** End Patch\n"
+                    )
+                },
+            ),
+        )
+        self.assertNotIn(
+            "permissionDecision",
+            gate("mcp__context7__query_docs", {"query": "current API"}),
+        )
+        self.assertEqual(
+            gate(
+                "apply_patch",
+                {
+                    "patch": (
+                        "*** Begin Patch\n"
+                        "*** Add File: .engineering-harness-provider-canary\n"
+                        "+blocked\n"
+                        "*** End Patch\n"
+                    )
+                },
+            )["permissionDecision"],
+            "deny",
+        )
+
+    def test_adaptive_prompt_toggle_and_locked_hook_boundary_in_strict_mode(self) -> None:
+        self.seed_javascript_project()
+        self.assertEqual(self.run_setup("install").returncode, 3)
+        manifest = json.loads(
+            (self.repo / ".agent-harness" / "manifest.json").read_text()
+        )
+        host = manifest["host_runtime"]
+        runtime_dir = Path(host["state_path"]).parent / "runtime"
+        prompt_script = runtime_dir / "userprompt_context.py"
+        gate_script = runtime_dir / "pretool_gate.py"
+        config_path = self.repo / ".agent-harness" / "config.json"
+        config = json.loads(config_path.read_text())
+        config.setdefault("write_gate", {})["mode"] = "strict"
+        config_path.write_text(json.dumps(config) + "\n")
         payload = json.dumps(
             {"user_prompt": "Upgrade this SDK and use its library option."}
         )
@@ -519,7 +626,6 @@ class SetupHarnessTest(unittest.TestCase):
         self.assertIn("stop after the questions", ambiguity_context)
         self.assertIn("do not retry tools", ambiguity_context)
 
-        config_path = self.repo / ".agent-harness" / "config.json"
         config = json.loads(config_path.read_text())
         config["adaptive_task_context"]["enabled"] = False
         config_path.write_text(json.dumps(config) + "\n")

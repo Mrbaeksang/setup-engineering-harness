@@ -70,6 +70,10 @@ class InstalledGateConformanceTest(unittest.TestCase):
         self.manifest = json.loads(
             (self.repo / ".agent-harness" / "manifest.json").read_text()
         )
+        config_path = self.repo / ".agent-harness" / "config.json"
+        config = json.loads(config_path.read_text())
+        config.setdefault("write_gate", {})["mode"] = "strict"
+        config_path.write_text(json.dumps(config) + "\n")
         self.host = self.manifest["host_runtime"]
         self.runtime_dir = Path(self.host["state_path"]).parent / "runtime"
         sys.path.insert(0, str(self.runtime_dir))

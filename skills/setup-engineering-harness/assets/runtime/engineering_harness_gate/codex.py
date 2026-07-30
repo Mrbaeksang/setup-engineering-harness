@@ -92,6 +92,19 @@ _MUTATING_TOOL_BASENAMES = frozenset(
         "write",
     }
 )
+_RESERVED_CANARY = ".engineering-harness-provider-canary"
+_PROTECTED_ASSISTIVE_ROOTS = frozenset(
+    {
+        ".agent-harness",
+        ".git",
+    }
+)
+_PROTECTED_ASSISTIVE_FILES = frozenset(
+    {
+        ".codex/hooks.json",
+        ".claude/settings.json",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +140,28 @@ class FileGateStateSource:
         if len(payload) > self.max_bytes:
             raise GateStateReadError("Gate state exceeds the size limit.")
         return payload
+
+
+@dataclass(slots=True)
+class AssistiveCodexAdapter:
+    """A thin project safety boundary that does not manage task lifecycle."""
+
+    project_root: Path
+
+    def evaluate_payload(self, payload: Any) -> GateDecision:
+        try:
+            return evaluate_assistive_payload(payload, self.project_root)
+        except Exception as error:
+            return GateDecision.deny(
+                "adapter-failure",
+                f"PreToolUse request could not be validated: {type(error).__name__}.",
+            )
+
+    def hook_response(self, payload: Any) -> dict[str, Any]:
+        decision = self.evaluate_payload(payload)
+        if decision.allowed:
+            return allow_hook_response()
+        return deny_hook_response(decision.reason)
 
 
 @dataclass(slots=True)
@@ -184,6 +219,162 @@ class CodexGateAdapter:
         if decision.allowed:
             return allow_hook_response()
         return deny_hook_response(decision.reason)
+
+
+def evaluate_assistive_payload(
+    payload: Any,
+    project_root: Path,
+) -> GateDecision:
+    """Allow normal work while protecting Harness-owned and secret paths."""
+
+    if not isinstance(payload, dict):
+        return GateDecision.deny(
+            "malformed-action", "PreToolUse payload must be an object."
+        )
+    event = payload.get("hook_event_name")
+    if event is not None and event != "PreToolUse":
+        return GateDecision.deny(
+            "malformed-action", "Hook event must be PreToolUse."
+        )
+    tool_name = payload.get("tool_name")
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_name, str) or not tool_name:
+        return GateDecision.deny(
+            "malformed-action", "Tool name must be a non-empty string."
+        )
+    if not isinstance(tool_input, dict):
+        return GateDecision.deny(
+            "malformed-action", "Tool input must be an object."
+        )
+
+    root = project_root.resolve(strict=False)
+    cwd_value = payload.get("cwd")
+    if cwd_value is None:
+        working_directory = root
+    elif not isinstance(cwd_value, str) or not cwd_value or "\0" in cwd_value:
+        return GateDecision.deny(
+            "malformed-action", "Hook cwd must be a valid path."
+        )
+    else:
+        working_directory = Path(cwd_value).resolve(strict=False)
+    if not _is_relative_to(working_directory, root):
+        return GateDecision.allow(
+            "outside-project",
+            "This Harness hook does not govern another Project.",
+        )
+
+    if tool_name in _SHELL_TOOLS:
+        command_field = "cmd" if tool_name == "exec_command" else "command"
+        command = tool_input.get(command_field)
+        if isinstance(command, str) and _RESERVED_CANARY in command:
+            return GateDecision.deny(
+                "reserved-canary",
+                "The provider verification canary must be denied by the Harness hook.",
+            )
+        return GateDecision.allow(
+            "assistive-shell",
+            "Normal shell work is governed by Codex permissions and sandboxing.",
+        )
+
+    requested_paths: tuple[str, ...] = ()
+    if tool_name in _NATIVE_PATH_TOOLS:
+        value = _one_path_value(tool_input)
+        if value is None:
+            return GateDecision.deny(
+                "malformed-action", "Native write has no single string path."
+            )
+        requested_paths = (value,)
+    elif tool_name in _MULTI_EDIT_TOOLS:
+        edits = tool_input.get("edits")
+        if not isinstance(edits, list) or not edits:
+            return GateDecision.deny(
+                "malformed-action", "Multi-edit has no edits."
+            )
+        values = tuple(
+            value
+            for edit in edits
+            if isinstance(edit, dict)
+            and (value := _one_path_value(edit)) is not None
+        )
+        if len(values) != len(edits):
+            return GateDecision.deny(
+                "malformed-action", "Multi-edit paths are incomplete."
+            )
+        requested_paths = values
+    elif tool_name in _PATCH_TOOLS:
+        patch_fields = [
+            value
+            for key in ("command", "patch")
+            if isinstance((value := tool_input.get(key)), str)
+        ]
+        if len(patch_fields) != 1:
+            return GateDecision.deny(
+                "malformed-action", "Patch payload is missing or ambiguous."
+            )
+        requested_paths = _extract_patch_paths(patch_fields[0])
+        if not requested_paths:
+            return GateDecision.deny(
+                "malformed-action", "Patch contains no recognized file path."
+            )
+    else:
+        return GateDecision.allow(
+            "assistive-tool",
+            "The assistive Harness does not blanket-block specialized tools.",
+        )
+
+    for requested in requested_paths:
+        fact = _path_fact(requested, working_directory)
+        lexical = Path(fact.lexical_path)
+        resolved = Path(fact.resolved_path)
+        if not _is_relative_to(lexical, root):
+            return GateDecision.deny(
+                "out-of-project",
+                "A write originating in this Project cannot escape its root.",
+            )
+        if not _is_relative_to(resolved, root):
+            return GateDecision.deny(
+                "symlink-escape",
+                "A write originating in this Project cannot follow a symlink outside it.",
+            )
+        relative = lexical.relative_to(root)
+        if _is_assistive_protected_path(relative):
+            return GateDecision.deny(
+                "protected-path",
+                f"Assistive safety boundary protects `{relative.as_posix()}`.",
+            )
+
+    return GateDecision.allow(
+        "assistive-write",
+        "Application writes are allowed without lifecycle ceremony.",
+    )
+
+
+def _is_assistive_protected_path(relative: Path) -> bool:
+    normalized = relative.as_posix().casefold()
+    parts = tuple(part.casefold() for part in relative.parts)
+    name = relative.name.casefold()
+    if name == _RESERVED_CANARY:
+        return True
+    if parts and parts[0] in _PROTECTED_ASSISTIVE_ROOTS:
+        return True
+    if normalized in _PROTECTED_ASSISTIVE_FILES:
+        return True
+    if name == ".env" or name.startswith(".env."):
+        return True
+    if relative.suffix.casefold() in {".pem", ".key", ".p12", ".pfx"}:
+        return True
+    if name in {
+        "credentials.json",
+        "credentials.yaml",
+        "credentials.yml",
+        "credentials.toml",
+        "secrets.json",
+        "secrets.yaml",
+        "secrets.yml",
+        "secrets.toml",
+    }:
+        return True
+    return False
 
 
 def load_gate_state(state_source: GateStateSource) -> GateState:

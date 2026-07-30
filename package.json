@@ -1,7 +1,7 @@
 {
   "name": "setup-engineering-harness",
-  "version": "0.1.0",
-  "description": "Install an evidence-gated engineering workflow into a repository.",
+  "version": "0.2.0",
+  "description": "Install an adaptive, stack-neutral engineering workflow into a repository.",
   "license": "Apache-2.0",
   "author": "Mrbaeksang",
   "type": "module",
@@ -38,7 +38,7 @@
     "claude-code",
     "codex",
     "developer-tools",
-    "evidence-gated"
+    "adaptive-workflow"
   ],
   "publishConfig": {
     "access": "public"

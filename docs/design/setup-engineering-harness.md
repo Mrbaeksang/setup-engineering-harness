@@ -1,574 +1,232 @@
-# Setup Engineering Harness
+# Engineering Harness 설계
 
-이 문서는 현재 구현의 제품 계약, 구조, 검증 근거를 한 곳에서 관리하는
-canonical 문서다. 진행 일지나 미래 로드맵이 아니다.
+상태: accepted
 
-## 한 문장 정의
+범위: `setup-engineering-harness` 설치기와 설치 결과
 
-기존 저장소에 한 번 Setup하면, 사용자가 대화하는 **하나의 코딩 AI**가
-질문·조사·구현·검증·문서화를 증거 우선 방식으로 수행하도록 자동 안내하고
-중요한 전환은 코드로 강제하는 Engineering Harness다.
+기본 provider: Codex
 
-## 요구사항 해석
+## 목적
 
-지금 만드는 것은 멀티에이전트 관리자나 Chief of Staff 제품이 아니다.
-현재 세션의 코딩 AI 자체를 더 정확하게 만드는 저장소용 Harness다.
+이 프로젝트는 특정 앱 템플릿을 설치하지 않는다. 한 Coding Agent가 사용자의 요구와
+현재 Project에 맞춰 다음을 일관되게 수행하도록 만드는 범용 Harness다.
 
-사용자가 기대하는 행동은 다음과 같다.
+1. 요구사항에서 실제로 결과를 바꾸는 미결정만 묻는다.
+2. 독립 질문은 한 번에 묶고, 답에 따라 다음 선택지가 달라지는 질문만 순차적으로
+   묻는다.
+3. 기존 Project를 먼저 조사하고 충분한 현재 스택은 유지한다.
+4. greenfield나 명시적 stack 변경은 같은 기준으로 현재 후보 2–3개를 비교한다.
+5. 모델 기억을 가설로 취급하고 exact version과 최신 공식 자료를 다시 확인한다.
+6. 작은 버그부터 큰 기능까지 작업 크기에 비례해 계획·문서·검증을 조절한다.
+7. 사용자의 자연어 확인을 그대로 이해한다. 별도 Task ID, hash, proposal ID, magic
+   phrase를 기본 UX로 요구하지 않는다.
+8. 단순 작업에 회의록, 진행 보고서, 연구 덤프, 형식적 spec/ticket을 만들지 않는다.
 
-1. 구현 결과를 바꾸는 정보가 없으면 먼저 묻는다.
-2. 질문은 독립적인 항목을 한 번에 묶고, 객관적인 A/B/C 선택지를 준다.
-3. 추천이 있으면 중립적인 선택지와 추천 근거를 분리한다.
-4. 설치된 정확한 버전과 해당 버전의 문서·타입·소스를 모델 기억보다
-   우선한다.
-5. 라이브러리 기본 기능을 확인하기 전에는 커스텀 우회 코드를 쓰지 않는다.
-6. 작은 작업은 작게 처리하고, 위험과 모호성이 큰 작업만 절차를 확장한다.
-7. DDD, 모듈성, 헥사고날 경계를 기본 사고법으로 사용하되 의미 없는
-   물리 계층은 만들지 않는다.
-8. diff, 테스트, 측정 같은 실행 증거 없이 완료를 주장하지 않는다.
-9. 에이전트가 읽을 문서는 짧고 계층적이어야 하며, 같은 사실을 여러 문서에
-   복제하지 않는다.
-10. 이 행동은 사용자가 매번 프롬프트로 상기시키지 않아도 자동으로
-    적용되어야 한다.
+Setup Skill은 이 동작을 기존 Project에 한 번에 설치하며 앱 코드를 변경하지 않는다.
 
-## Assumptions
+## 제품 원칙
 
-- 로컬 우선, 단일 사용자, Git 저장소를 기준으로 한다.
-- 현재 설치 가능한 provider 경계는 Codex와 Claude Code project hook이다.
-- Python 3.12 표준 라이브러리만으로 Setup과 host runtime을 실행한다.
-- Linux/WSL에서는 `bubblewrap`, macOS에서는 `sandbox-exec`이 있어야
-  관리형 검증을 완료 증거로 사용할 수 있다.
-- 앱 저장소의 기존 규칙과 사용자가 소유한 설정은 Setup보다 우선한다.
-- 공개 저장소이며 Apache License 2.0으로 배포한다.
+### Stack-neutral
 
-## 현재 범위와 경계
+Harness는 Next.js, FastAPI, DDD, hexagonal architecture 같은 선택을 기본값으로 밀지
+않는다. Project에 이미 있는 경계와 exact version을 먼저 찾는다. 새 선택이 필요하면
+제품/운영 기준을 먼저 합의하고 현재 공식 자료로 후보를 비교한다.
 
-현재 구현은 다음을 포함한다.
+### Version-correct
 
-- 결정적인 `plan`, `install`, `verify-provider`, `audit`, `repair`,
-  `uninstall`
-- 기존 provider instruction과 hook 설정을 보존하는 managed merge
-- npm 실행기, Agent Skill, Claude Code Marketplace의 단일 버전 배포
-- manifest, lockfile, 검증 script, instruction 파일의 bounded profiling
-- 얇은 instruction bridge와 task-triggered Playbook
-- 검색·부분 읽기·얕은 구조 지도·안전한 Git diff를 제공하는 read broker
-- 구조화된 acceptance contract, Evidence, Decision, scoped Write Lease
-- dependency research와 architecture drift를 막는 fail-closed Gate
-- 격리 snapshot에서만 실행되는 verification broker와 completion receipt
-- control / stable / adaptive-R&D를 비교하는 benchmark 및 scoring runtime
+라이브러리·framework·SDK·API 작업의 evidence ladder는 다음과 같다.
 
-현재 제품 경계 밖의 기능을 이 문서에 약속하지 않는다. 특히 이 구현은
-멀티에이전트 세션 관리, TUI, daemon, 애플리케이션 배포 자동화, vector memory,
-범용 workflow engine이 아니다.
+1. lockfile, installed metadata, runtime/tool output으로 exact version 확인
+2. 그 version에 맞는 primary official docs와 migration/release notes 확인
+3. 좁은 public types, exports, installed source 확인
+4. 최소 reproduction
+5. native supported capability 우선
 
-## 설계 후보와 선택
+기억 속 API가 이전 major에 해당하면 그대로 생성하지 않는다. 선택한 version의 공식
+문서와 migration을 다시 읽고 현재 API를 사용한다.
 
-| 후보 | 장점 | 한계 | 판단 |
-|---|---|---|---|
-| 거대한 prompt 또는 `AGENTS.md`만 사용 | 가장 단순하고 즉시 적용 가능 | 우회 가능, 항상 긴 context, 검증 없는 완료를 막지 못함 | 제외 |
-| Setup Skill + repo-local 문서만 사용 | Matt Pocock식 one-shot UX, Git에서 검토 가능, 점진적 문서 로딩 | 모델이 문서를 무시하면 쓰기와 완료를 막지 못함 | 단독 사용 제외 |
-| **Setup Skill + thin bridge + host-side Gate + broker** | one-shot UX와 기계적 강제를 함께 제공, 상태를 앱 코드와 분리 | hook 신뢰와 OS 격리 기능에 의존, 구현 복잡도 증가 | **선택** |
+### Adaptive
 
-선택 근거는 “좋은 지시”와 “강제 가능한 invariant”를 분리할 수 있기
-때문이다. 질문의 문장이나 조사 순서는 Playbook에 둔다. 비밀 경로 접근,
-acceptance 없는 쓰기, 범위 밖 편집, 검증 없는 완료는 Gate에 둔다.
+| 작업 크기 | 기본 흐름 |
+| --- | --- |
+| 작은 버그/수정 | reproduce → fix → regression → verify |
+| 중간 기능 | align → research → compact spec → implement → verify |
+| 큰/고비용 결정 | deep align → research → user choice → compact spec → tracer-bullet slices |
 
-## 행동 계약
+분류는 줄 수가 아니라 불확실성, 경계 수, 되돌리기 비용, 외부 계약, 위험으로 한다.
 
-### 대화
+### Artifact on demand
 
-모호한 요청은 즉시 구현하지 않는다. 먼저 저장소 사실을 bounded하게
-확인한 뒤 결과를 바꾸는 질문만 묻는다.
+- 단순 작업: 별도 문서 없음
+- 중간 작업: 대화 안의 compact spec
+- 지속될 domain/architecture 결정: 기존 canonical CONTEXT/ADR 갱신
+- 여러 context·사람·시스템에 걸친 큰 작업: 합의된 tracer-bullet ticket
+- research notes: 기본 ephemeral
 
-- 질문은 서로 의존하지 않는 것끼리 한 번에 묶는다.
-- 선택지는 같은 비교 축을 가진 객관적인 A/B/C로 만든다.
-- 선택지 안에 추천을 숨기지 않는다.
-- 추천은 별도 문단에서 기준과 trade-off를 밝힌다.
-- 이미 저장소나 사용자 답변으로 결정된 내용은 다시 묻지 않는다.
-- 되돌리기 쉽고 사용자 경험에 영향이 없는 결정은 근거와 함께 자동으로
-  처리한다.
-
-### 의존성과 최신성
-
-Dependency signal이 있으면 다음 순서로 좁혀 읽는다.
-
-1. manifest와 lockfile
-2. 설치된 정확한 버전
-3. 그 버전에 맞는 공식 문서
-4. migration guide와 changelog
-5. 타입 정의
-6. 설치된 소스
-7. 공식 issue/discussion
-8. 최소 재현과 변경 전후 검증
-
-`latest`는 가장 높은 번호가 아니라 현재 안정성, 생태계 호환성, 배포
-지원, 필요한 기능, migration 비용을 함께 만족하는 버전이다. 기존 기능이
-요구사항을 해결하면 커스텀 memoization, cache, debounce, wrapper보다
-우선한다.
-
-### 설계와 구현
-
-- acceptance outcome과 관찰 가능한 criterion을 먼저 고정한다.
-- 예상 write path와 검증 명령을 선언한다.
-- DDD 용어로 invariant와 경계를 찾는다.
-- 실제 경계가 있을 때만 module/port/adapter를 물리적으로 만든다.
-- 승인되지 않은 dependency, architecture 변경, 범위 밖 refactor는
-  새 Decision으로 되돌린다.
-- 유효한 Write Lease 범위 안에서만 수정한다.
-- 가장 작은 증거 기반 변경을 우선한다.
-
-### 검증과 완료
-
-- 가능한 경우 실패하는 baseline을 먼저 재현한다.
-- Project Profile에 등록된 정확한 command만 verification broker로
-  실행한다.
-- source-controlled 입력은 disposable snapshot에서 실행하고 network와
-  외부 쓰기를 막는다.
-- 구현 뒤 brokered `git-status`와 `git-diff`로 범위와 주변 style을
-  확인한다.
-- acceptance criterion마다 fresh receipt 또는 명시적인 사용자 Decision이
-  있어야 한다.
-- ordinary application change에는 Harness audit를 요구하지 않는다.
-- Harness 또는 instruction 변경에는 Harness audit가 필요하다.
-- 모든 현재 receipt가 implementation hash와 일치할 때만 completion
-  receipt를 만들고 lease를 폐기한다.
-
-### 문서
-
-문서는 생성보다 승격을 우선한다.
-
-- 안정된 용어: `CONTEXT.md`
-- 설치·사용·현재 경계: `README.md`
-- 제품 계약·구조·검증 근거: 이 문서
-- Task 중간 로그, worker 보고, 임시 조사, raw output: 영구 Markdown으로
-  만들지 않는다.
-- 결정이 바뀌면 canonical 문서를 갱신하고 대체된 설명은 삭제한다.
-- 미래 범위, 회의록, 진행 보고서, 동일 내용의 요약 문서를 누적하지 않는다.
-
-## 구조
+## 설치 구조
 
 ```text
-사용자 Prompt
-    │
-    ▼
-Provider UserPromptSubmit Hook
-    ├── Task/Revision 생성 또는 갱신
-    ├── 기존 Write Lease 폐기
-    └── bounded Context Pack 주입
-             │
-             ▼
-        Coding Agent
-        ├── read broker ───────────────┐
-        ├── lifecycle broker           │
-        ├── verification broker        │
-        └── apply_patch / shell        │
-             │                         │
-             ▼                         │
-Provider PreToolUse Hook                │
-    └── host-side Policy Gate ◀────────┘
-             │
-      allow / deny / context
-             │
-             ▼
- scoped write → isolated proof → completion receipt
+Project
+├── AGENTS.md 또는 CLAUDE.md       Managed Bridge
+├── provider Hook 설정             기존 Hook과 병합
+└── .agent-harness/
+    ├── config.json                 user-owned, seed once
+    ├── local.md                    user-owned, seed once
+    ├── repo-profile.json           installer-owned, regenerable
+    ├── router.md                   progressive Playbook routing
+    ├── playbooks/
+    │   ├── core.md
+    │   ├── conversation.md
+    │   ├── dependencies.md
+    │   ├── planning.md
+    │   ├── implementation.md
+    │   ├── architecture.md
+    │   ├── verification.md
+    │   ├── documentation.md
+    │   └── safety.md
+    ├── bin/                        optional helpers/strict compatibility
+    ├── checks/audit.py
+    └── manifest.json
+
+XDG state directory
+├── trusted Hook runtime
+├── provider verification status
+└── strict-mode lifecycle state
 ```
 
-Setup 결과는 두 trust zone으로 나뉜다.
-
-```text
-Project Git tree                         Host user state
-────────────────────────────────────    ─────────────────────────────
-AGENTS.md 또는 CLAUDE.md bridge         trusted hook runtime
-.codex/hooks.json 또는                  authoritative gate-state.json
-.claude/settings.json
-.agent-harness/router.md                setup-status.json
-.agent-harness/playbooks/*              proposals and receipts
-.agent-harness/repo-profile.json        synchronization locks
-.agent-harness/bin/* broker clients
-.agent-harness/config.json
-.agent-harness/local.md
-```
-
-앱 코드를 수정할 수 있는 workspace 안의 파일은 Gate의 authoritative
-state가 될 수 없다.
-
-## 컴포넌트
-
-### Setup Skill
-
-사용자가 한 번 호출하는 진입점이다. 기존 파일을 bounded하게 조사하고
-변경 계획을 보여준 뒤 정확한 범위에 대해 한 번 승인받는다.
-
-### Repository Profiler
-
-manifest, lockfile, instruction, CI, 알려진 검증 script를 읽어
-`repo-profile.json`을 재생성한다. 명령은 탐지할 뿐 Setup 중 실행하지
-않는다.
-
-패키지 매니저가 모호하면 npm/pnpm/Yarn/Bun을 추측하지 않는다. 다만
-`node --test`처럼 package manager와 무관한 직접 runtime 명령은 shell
-조합이 없는 경우에 한해 등록한다.
-
-### Installer
-
-소유권 manifest와 content hash를 사용해 원자적으로 설치한다.
-
-- user-owned: `config.json`, `local.md`, 기존 instruction의 비관리 영역
-- installer-owned: bridge, router, Playbook, broker, runtime contract,
-  generated profile
-- drift가 있으면 조용히 덮어쓰지 않고 `repair` 승인을 요구한다.
-- 반복 install은 byte-identical이어야 한다.
-
-### Context Selector와 Read Broker
-
-항상 전체 문서를 넣지 않는다.
-
-1. 얇은 bridge
-2. task signal에 맞는 compact context
-3. router
-4. 필요한 Playbook만
-5. 구조 지도
-6. 관련 source slice
-7. 긴 출력은 모델 밖에서 검색·집계
-
-read broker는 `map`, `search`, `read`, `git-status`, `git-diff`만
-허용하고 secret/protected glob, symlink escape, broad dump를 막는다.
-
-### Lifecycle와 Policy Gate
-
-acceptance, Decision, Evidence, Write Lease, verification, completion의
-invariant를 host state에서 관리한다. protocol 어휘를 추측하지 않도록
-read-only `describe` 인터페이스를 제공한다.
-
-### Verification Broker
-
-Project Profile에 등록된 identifier만 받는다. 정확한 argv로 파싱하고
-shell을 사용하지 않는다. Git snapshot, 허용된 runtime, CPU/memory/time
-limit, network 차단 안에서 실행한다. live tree를 바꾸거나 input hash가
-달라지면 receipt를 발급하지 않는다.
-
-### Benchmark Runtime
-
-control, stable Harness, adaptive-context R&D variant의 trace를 동일 schema로
-정규화한다. correctness뿐 아니라 Evidence, 최소 변경, decision safety,
-proof, retry/denial/context 비용을 함께 비교한다. synthetic fixture와
-provider-attested run을 명확히 구분한다.
-
-## 상태 머신
-
-```text
-DISCOVERY_LOCKED
-       │ complete structured acceptance
-       ▼
-   DISCOVERY
-    ├── 제품 선택 필요 ─────────────→ DECISION_REQUIRED
-    ├── dependency 근거 필요 ───────→ RESEARCH_REQUIRED
-    └── 전제 충족 ──────────────────→ READY_TO_WRITE
-                                          │ scoped lease
-                                          ▼
-                                     IMPLEMENTING
-                                          │ submitted diff
-                                          ▼
-                                       VERIFYING
-                                     ├─ fail → IMPLEMENTING
-                                     └─ proof → COMPLETE
-```
-
-공통 결과는 `BLOCKED`와 명시적 `OVERRIDDEN`이다.
-
-중요한 전환 조건:
-
-- 새 사용자 turn은 기존 lease를 폐기하고 Task revision을 올린다.
-- unresolved product Decision이 있으면 쓰기 상태로 갈 수 없다.
-- dependency Task는 exact version과 native-capability 조사 없이 lease를
-  얻을 수 없다.
-- protected action 때 base tree, acceptance hash, Evidence hash, allowed
-  glob을 다시 확인한다.
-- 구현 이후 live output과 receipt의 implementation hash가 달라지면 다시
-  검증해야 한다.
-
-## 핵심 도메인 모델
-
-```typescript
-interface TaskContract {
-  taskId: string;
-  revision: number;
-  userPromptHash: string;
-  outcome: string;
-  criteria: AcceptanceCriterion[];
-  exclusions: string[];
-  assumptions: string[];
-  pendingDecisionIds: string[];
-}
-
-interface Evidence {
-  evidenceId: string;
-  kind:
-    | "repository-fact"
-    | "exact-version"
-    | "official-doc"
-    | "migration-guide"
-    | "type-definition"
-    | "source-code"
-    | "official-issue"
-    | "reproduction"
-    | "verification";
-  source: string;
-  exactVersion?: string;
-  contentHash: string;
-  capturedAt: string;
-}
-
-interface WriteLease {
-  leaseId: string;
-  taskId: string;
-  acceptanceHash: string;
-  evidenceSetHash: string;
-  baseTreeHash: string;
-  allowedGlobs: string[];
-  allowedCommands: string[];
-}
-
-interface VerificationReceipt {
-  verificationId: string;
-  commandHash: string;
-  outputHash: string;
-  exitCode: 0;
-  implementationTreeHash: string;
-}
-
-interface CompletionReceipt {
-  completionId: string;
-  taskId: string;
-  leaseId: string;
-  acceptanceHash: string;
-  receiptSetHash: string;
-  implementationTreeHash: string;
-}
-```
-
-## 주요 인터페이스와 이벤트
-
-### Provider events
-
-`UserPromptSubmit`
-
-- 입력: `session_id`, `cwd`, `hook_event_name`, `user_prompt`
-- 출력: compact `additionalContext`
-- 효과: Task 생성/갱신, 기존 lease 폐기
-
-`PreToolUse`
-
-- 입력: canonical `tool_name`과 provider-native `tool_input`
-- `Bash`와 `apply_patch`는 `tool_input.command`를 사용한다.
-- 출력: allow, deny reason, 또는 추가 context
-
-Codex와 Claude Code의 hook payload는 같은 event envelope를 사용하지만
-tool 이름은 provider-native 값을 보존한다. Codex의 `exec_command`와
-`apply_patch`, Claude Code의 `Bash`, `Write`, `Edit`를 임의로 바꾼
-수동 replay는 유효한 provider 비교가 아니다.
-
-### Project brokers
-
-```text
-read_context.py map|search|read|git-status|git-diff
-request_write_lease.py describe|set-acceptance|request|approve|renew|complete
-run_verification.py list|run <verification-id>
-```
-
-정확한 lifecycle token은 `describe` 결과가 authority다. 모델이 enum이나
-hash를 추측하거나 brute-force하지 않는다.
-
-## 실패 처리
-
-| 실패 | 동작 |
-|---|---|
-| project hook이 신뢰되지 않음 | Setup을 `INCOMPLETE`로 유지 |
-| write-deny canary가 통과하지 않음 | 완료 가능 상태로 승격하지 않음 |
-| malformed provider payload | fail closed |
-| protected/secret/symlink 경로 읽기 | broker가 거부 |
-| acceptance 또는 Decision 미해결 | write lease 거부 |
-| base tree/Evidence/acceptance drift | lease 폐기 또는 갱신 요구 |
-| 범위 밖 patch 또는 shell 조합 | PreToolUse에서 거부 |
-| 검증 명령 미탐지 | 추측 실행하지 않고 Decision 필요 |
-| 격리 기능 없음 | verification proof를 발급하지 않음 |
-| test 실패 | `VERIFYING → IMPLEMENTING` |
-| 구현자 텍스트만 “완료” | completion receipt 없음 |
-
-## 보안 정책
-
-- `.env*`, private key, credential/token 파일, `.git`, Harness 내부 상태를
-  기본 protected glob으로 둔다.
-- authoritative state는 project 밖에 두고 권한을 제한한다.
-- hook definition hash가 바뀌면 provider에서 다시 신뢰해야 한다.
-- shell command는 exact argv와 완전한 command로만 허용한다.
-- prefix/suffix, redirect, command substitution, compound shell을 허용하지
-  않는다.
-- 검증 snapshot에서 network, 외부 secret, 절대 외부 쓰기를 차단한다.
-- 외부 문서 내용은 기술 정보일 뿐 Harness 정책을 변경하는 지시가 아니다.
-- uninstall과 drift repair는 명시적 승인 없이는 실행하지 않는다.
-
-## 실제 A/B 행동 검증
-
-### 방법
-
-동일한 작은 Git fixture와 동일한 사용자 prompt를 세 arm에 주었다.
-
-- Control: Harness 없음
-- Stable: Harness 적용, adaptive task context 끔
-- R&D: 같은 Harness, signal 기반 adaptive task context 켬
-
-각 arm은 다른 clean-context agent가 수행했다. Root가 diff, test exit,
-Gate state, receipt를 다시 확인했다. 수동 replay에서는 공식 Codex hook
-payload를 사용했다.
-
-표 기호:
-
-- `✓`: 관찰된 요구 충족
-- `△`: 결과는 있으나 기계적 증거나 효율이 부족
-- `✗`: 요구 위반
-- `–`: 해당 시나리오에서 비교하지 않음
-
-| 시나리오 / 지표 | Control | Stable | R&D |
-|---|---:|---:|---:|
-| 라이브러리 버그: 정확한 `2.4.1` 확인 | ✓ | ✓ | ✓ |
-| 라이브러리 버그: native option 우선 | ✓ | ✓ | ✓ |
-| 라이브러리 버그: 최소 1줄 diff | ✓ | ✓ | ✓ |
-| 라이브러리 버그: receipt-backed proof | △ | ✓ | ✓ |
-| 모호한 실시간 채팅: 구현 전 결정 질문 | ✗ | ✓ | ✓ |
-| 모호한 실시간 채팅: 파일 변경 0 | ✗ | ✓ | ✓ |
-| 모호한 실시간 채팅: bounded context 효율 | ✗ | △ | ✓ |
-| 초소형 로컬 버그: 정확한 1줄 수정 | ✓ | ✓ | ✓ |
-| 초소형 로컬 버그: baseline/final proof | △ | ✓ | ✓ |
-| 초소형 로컬 버그: 불필요한 dependency/refactor | ✓ | ✓ | ✓ |
-
-관찰 요약:
-
-- 쉬운 dependency bug에서는 Control도 정답을 냈다. Harness의 차이는
-  정답 자체보다 exact-version/native-capability Evidence와 completion
-  receipt를 강제한다는 점이었다.
-- 모호한 architecture 요청에서 Control은 질문 없이 `ws`를 설치하고
-  파일을 바꿨다. Stable과 R&D는 쓰기 전에 멈췄다.
-- R&D는 모호한 요청에서 Stable보다 적은 broker read로 더 완전한 질문
-  묶음을 만들었다.
-- 초소형 버그는 profiler 수정 뒤 Stable과 R&D 모두 동일한 1줄 diff와
-  `1/1` test, completion receipt를 만들었다.
-- 마지막 untouched R&D 재시험은 acceptance/Proof/검증 순서를 첫 시도에
-  맞춰 제품 workflow denial 없이 완료했다. 수동 hook replay가 잘못된
-  state 파일을 넣은 1회는 test-driver 오류로 제외했다.
-
-현재 선택은 **adaptive task context를 기본 활성화하되 signal이 있을 때만
-추가 context를 주입하는 R&D 방식**이다. 모든 작업에 무거운 절차를
-주입하지 않는다.
-
-### A/B에서 발견해 반영한 결함
-
-| 관찰 | 반영한 수정 |
-|---|---|
-| 같은 prompt의 agent-authored acceptance 초안이 Decision으로 고착 | 동일 provenance의 미승인 초안은 교체 가능하게 함 |
-| 첫 검증이 `.pyc`를 만들어 자기 drift 발생 | broker runtime의 bytecode 쓰기 차단 |
-| lifecycle enum과 dependency token을 agent가 추측 | read-only `describe`와 정확한 token/hash 반환 |
-| 1줄 수정의 indentation drift를 보지 못함 | brokered `git-status`/`git-diff`와 완료 전 diff 확인 |
-| 긴 임시 경로에서 task signal이 1,800자 뒤로 잘림 | signal을 path-heavy 안내보다 먼저 배치하고 lifecycle prefix 중복 제거 |
-| lockfile 없는 `node --test`가 검증 후보에서 사라짐 | shell-free direct Node test runner를 보수적으로 탐지 |
-| thin bridge와 상세 Playbook의 audit 조건 충돌 | audit를 Harness/instruction 변경에만 한정 |
-| acceptance 값의 공백/quote 처리에서 불필요한 retry | 한 개의 hyphenated shell token만 쓰도록 주입 문구 명시 |
-| criterion이 행동만 말하고 proof와 매핑되지 않음 | 각 criterion token에 등록된 proof kind/ID를 필수로 안내 |
-| discovery-locked에서 baseline broker를 먼저 호출 | acceptance/lease 뒤 baseline을 실행하는 순서를 명시 |
-| benchmark 표가 부분 run을 완전 비교처럼 보임 | run coverage와 분모를 표에 표시 |
-
-### 제외한 실행
-
-다음은 제품 점수에 넣지 않았다.
-
-- 공식 schema와 다른 hook envelope
-- 이전 Harness 파일이 dirty baseline으로 섞인 fixture
-- `apply_patch`를 `Bash`로 잘못 표기한 수동 replay
-- `gate-state.json` 대신 `setup-status.json`을 넣은 수동 replay
-- 중간 도움 메시지를 받은 acceptance 진단 실행
-- 로컬 `bubblewrap`/network 환경 때문에 Task 시작 전에 실패한 live CLI
-
-이 구분이 없으면 test-driver 오류를 제품 결함이나 성능으로 잘못 센다.
-
-### 한계
-
-- 각 arm/시나리오가 한 번뿐이라 통계적 유의성이 없다.
-- collaboration agent + 수동 hook replay는 실제 Codex provider-attested
-  세션과 동일하지 않다.
-- 토큰과 wall time이 모든 arm에서 같은 계측기로 수집되지 않았다.
-- 따라서 현재 결과는 방향성 있는 smoke evidence이며 자동 promotion
-  근거가 아니다.
-
-## 현재 검증
-
-- 전체 Python test suite: `190/190` 통과
-- npm 실행기 test suite: `3/3` 통과
-- Setup Skill `quick_validate`: 통과
-- Claude Code `2.1.212`와 `2.1.220`의 strict Marketplace validation: 통과
-- 격리된 Claude Marketplace add/install, cached plugin Setup, Claude `Write`
-  hook deny replay: 통과
-- trusted-hook denial canary와 Harness audit 경로: test suite에서 통과
-- macOS, Python `3.14.6`, Codex CLI `0.146.0` 실제 trusted-hook canary와
-  Harness audit: 통과
-- 같은 환경의 `sandbox-exec` 격리 snapshot에서 Vite production build:
-  통과
-- 초소형 버그 Stable completion:
-  `COMPLETE-59504db31a5656bdafb4`
-- 초소형 버그 R&D completion:
-  `COMPLETE-30003fd8f5f8d3820f60`
-- 최종 untouched R&D completion:
-  `COMPLETE-8b73a5e525e011b848e0`
-
-Codex provider canary는 `workspace-write` sandbox에서 예약된
-`.engineering-harness-provider-canary` 쓰기를 시도한다. `read-only`
-sandbox를 사용하면 provider hook보다 sandbox가 먼저 거부해 hook
-enforcement를 증명할 수 없기 때문이다. 현재 Codex CLI `0.146.0`의
-`Command blocked by PreToolUse hook` 출력 형식을 회귀 테스트로 고정한다.
-예약 파일이 실제로 생기면 즉시 제거하고 검증을 실패시킨다.
-
-각 설치 대상에서는 실제 provider 계정으로 provider-attested canary를
-별도 통과해야 한다. 위 Codex 실행은 이번 검증 환경의 증거이며, 다른
-설치의 manifest validation, trust bypass, 수동 hook replay를 대신하지
-않는다.
-
-`benchmarks/fixtures/applied-vs-research.jsonl`은 scoring engine용 synthetic
-fixture다. 실제 A/B 관찰로 오해하지 않는다.
-
-## 채택한 외부 철학
-
-- [Matt Pocock skills](https://github.com/mattpocock/skills): 한 번 Setup하고
-  repo-local skill/instruction을 통해 반복 행동을 자동화하는 UX
-- [context-mode](https://github.com/mksglu/context-mode): 큰 출력은 모델
-  밖에서 처리하고 파생 결과만 context에 넣기
-- [CodeGraph](https://github.com/colbymchenry/codegraph): 파일 전체보다
-  구조·관계·영향 범위를 먼저 보기
-- [Kage](https://github.com/kage-core/Kage): 기억과 코드 사실에 provenance와
-  freshness 붙이기
-- [trajectory](https://github.com/letta-ai/trajectory): agent trace를 공통
-  schema로 정규화하기
-- [harness-engineering](https://github.com/lopopolo/harness-engineering):
-  모델 교체 전에 context, tool, permission, verification 환경을 개선하기
-- [Codex Hooks 공식 문서](https://learn.chatgpt.com/docs/hooks): provider
-  event, canonical tool name, trust, allow/deny 계약
-- [Claude Code Hooks 공식 문서](https://code.claude.com/docs/en/hooks):
-  project hook schema, provider-native tool 입력, deny 계약
-- [Claude Code Marketplace 공식 문서](https://code.claude.com/docs/en/plugin-marketplaces):
-  cache 격리, manifest 검증, 설치·업데이트 계약
-
-도구 자체를 필수 dependency로 채택한 것이 아니다. 철학을 작은
-repo-native broker와 Gate에 구현했다.
-
-## 가장 큰 기술적 위험
-
-가장 큰 위험은 **provider hook이 실제 tool surface를 완전히 관찰한다고
-잘못 믿는 것**이다. 공식 문서도 일부 specialized tool path가 기본 hook을
-우회할 수 있다고 명시한다. 따라서 provider canary가 통과하지 않으면
-Harness를 완료 상태로 보지 않으며, hook만으로 OS sandbox나 사용자 승인
-경계를 대체하지 않는다.
-
-두 번째 위험은 process overhead가 작은 작업의 품질 이득보다 커지는
-것이다. 그래서 adaptive signal routing, direct verification discovery,
-bounded reads, scenario별 A/B를 함께 유지한다.
-
-세 번째 위험은 문서와 runtime 계약의 drift다. installer-owned asset,
-content hash, idempotence test, audit, canonical 문서 하나로 이를 줄인다.
+Managed Bridge는 짧게 유지한다. 항상 Project Profile과 사용자 소유 제약을 읽고,
+Task signal에 맞는 Playbook만 점진적으로 읽는다.
+
+## Hook 모드
+
+### Assistive — 기본값
+
+`write_gate.mode`가 없거나 `"assistive"`면:
+
+- UserPromptSubmit은 lifecycle state를 만들거나 갱신하지 않는다.
+- Task ID, acceptance hash, Decision ID, proposal, lease command를 주입하지 않는다.
+- 현재 Project/greenfield 판단, 질문 방식, version research, adaptive workflow,
+  artifact policy, verification 규칙만 짧게 주입한다.
+- 일반 shell, app write, web, Context7, ImageGen과 future specialized tools를 blanket
+  deny하지 않는다.
+- 다른 Project cwd의 호출에는 no-op한다.
+
+PreToolUse Hook이 직접 막는 범위:
+
+- `.env*`, private key/credential/secret 파일의 native write
+- `.agent-harness/**`, `.git/**`
+- `.codex/hooks.json`, `.claude/settings.json`
+- `.engineering-harness-provider-canary`
+- malformed native write/patch payload
+
+일반 shell 실행과 specialized tool의 실제 권한은 Codex의 permission/sandbox가
+담당한다. Hook은 모든 가능한 side effect를 추측하는 security theater를 만들지 않는다.
+
+### Strict — 명시적 호환 모드
+
+`write_gate.mode = "strict"`를 선택한 Project는 기존 구조화 acceptance, Evidence,
+Decision, scoped Write Lease, brokered verification lifecycle을 사용한다. 이는 기본
+대화 UX가 아니며 높은 통제가 필요한 Project를 위한 호환 경로다.
+
+기존 mode 없는 user-owned config도 assistive로 해석한다. 설치기는 user-owned config를
+덮어쓰지 않는다.
+
+## 대화 계약
+
+Coding Agent는 먼저 repository facts로 답할 수 있는 문제를 해결한다. 질문이 필요하면:
+
+- behavior, architecture, cost, security, external contract, irreversible choice에 영향을
+  주는 것만 묻는다.
+- 서로 독립인 질문은 한 번호 묶음으로 보낸다.
+- 의존 질문은 이전 답을 받은 뒤 묻는다.
+- 각 선택지는 같은 비교 차원을 사용하고 실제 tradeoff를 밝힌다.
+- recommendation은 options와 분리해 근거를 말한다.
+- 미결정이 없으면 reversible assumption을 밝히고 진행한다.
+
+`ㅇㅇ`, `그렇게 해`, `yes`, `go ahead` 같은 표현은 referent가 분명하면 유효한 확인이다.
+문구가 다르다는 이유로 사용자를 다시 승인 루프에 넣지 않는다.
+
+## Stack 선택 계약
+
+### Existing Project
+
+1. instructions, manifests, lockfiles, exact installed versions, source, tests, CI를 제한적으로
+   조사한다.
+2. 현재 stack이 요구를 만족하면 유지한다.
+3. native capability를 wrapper나 새 dependency보다 먼저 찾는다.
+4. upgrade는 capability, compatibility, security, support 이유가 명확할 때만 제안한다.
+5. upgrade 시 crossed migration range를 검증한다.
+
+### Greenfield 또는 명시적 변경
+
+1. 요구사항에서 평가 기준을 만든다.
+2. 최신 primary official sources로 후보 2–3개를 조사한다.
+3. stable version, runtime/support policy, capability, ecosystem, deployment, asset/tooling,
+   team constraints를 같은 표면에서 비교한다.
+4. 되돌리기 어려운 선택이면 user choice를 받는다.
+5. 선택 뒤 그 exact version의 docs/migration/types를 다시 읽고 구현한다.
+
+## 계획과 구현
+
+Compact spec에는 필요한 경우에만 다음을 둔다.
+
+- outcome과 observable acceptance
+- exclusions와 assumptions
+- affected behavior/boundaries
+- exact stack/version facts와 research 결정
+- verification seams
+
+큰 작업은 horizontal layer ticket이 아니라 end-to-end tracer bullet로 나눈다. 각 slice는
+작은 사용자 가치를 전달하고 독립 검증 가능하며 Project를 runnable 상태로 남긴다.
+한 slice씩 구현하고 좁은 검증을 거친다.
+
+## 검증
+
+완료 주장은 fresh observation에만 근거한다.
+
+1. 가능한 경우 failure/baseline 재현
+2. 바뀐 public behavior를 직접 다루는 narrow regression
+3. risk에 비례한 repository-native test/type/lint/build/integration/UI/performance checks
+4. `git status`와 diff로 scope, style, noise, secret exposure 확인
+5. Harness/instruction 변경일 때만 `python3 .agent-harness/checks/audit.py`
+
+Project Profile의 command는 detected candidate이지 실행 결과가 아니다. 실행하지 않은
+검증은 PASS라고 말하지 않는다.
+
+## 설치·소유권·복구
+
+- Python 3.12+ standard library만으로 plan/install/audit/repair/uninstall 가능
+- install 전 plan은 read-only
+- 기존 instructions와 unrelated hooks 보존
+- installer-owned 파일 drift 시 install 중단
+- repair는 content-addressed recovery copy를 만든 뒤 명시적으로 복구
+- repeated install은 byte-identical
+- uninstall은 managed content만 제거하고 user-owned/unknown 파일 보존
+- install/repair는 앱 코드, Project dependency, secret, Project command를 건드리지 않음
+
+## Provider canary
+
+`verify-provider`는 fresh provider session에서
+`.engineering-harness-provider-canary` native write를 한 번 시도한다. provider Hook이
+실제로 deny해야 PASS다. sandbox 자체 deny나 simulated replay는 대체 evidence가 아니다.
+canary 전후 runtime/lifecycle state는 보존하고 reserved file이 남으면 실패한다.
+
+## 테스트 전략
+
+- assistive unit: normal shell/app write/specialized tools allow, protected paths/canary deny,
+  other Project no-op
+- strict conformance: canonical/bundled adapter와 lifecycle 회귀
+- installer: plan/install idempotence, preservation, repair, uninstall, user-owned config
+- provider: real canary receipt와 audit binding
+- distribution: packaged Skill asset completeness
+- regression: natural later-user answer handling in strict compatibility mode
+
+완료 조건은 전체 Python/npm suite, distribution verification, 설치 fixture의 audit, 가능한
+환경에서 real provider canary가 모두 관찰된 결과로 남는 것이다.
+
+## 알려진 한계
+
+- thin assistive Hook은 future specialized tool의 side effect를 완전 분류하지 않는다.
+- provider sandbox/permission 설정이 normal execution의 실질 boundary다.
+- clean-context benchmark는 방향성 evidence이며 통계적 제품 품질 증명이 아니다.
+- strict runtime은 호환성 때문에 크지만 assistive 기본 경로에서는 사용되지 않는다.

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable
 
-HARNESS_VERSION = "0.1.0"
+HARNESS_VERSION = "0.2.0"
 SCHEMA_VERSION = 1
 HARNESS_NAME = "engineering-harness"
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -45,9 +45,9 @@ BRIDGE_TEXT = f"""\
 
 For coding work, read `.agent-harness/router.md` before broad exploration. It routes only the
 Playbooks needed for the current Task. Apply detected facts from `repo-profile.json` and
-user-owned constraints from `config.json` and `local.md`. While the write Gate is locked, use the
-installed read-only broker. Never bypass provider hook trust or Gate state. Before claiming
-completion, follow the verification Playbook. Run
+user-owned constraints from `config.json` and `local.md`. The default assistive Hook is a thin
+safety boundary; it does not require acceptance tokens or leases for normal app work. Before
+claiming completion, follow the verification Playbook. Run
 `python3 .agent-harness/checks/audit.py` after Harness or instruction changes, not ordinary
 application-code changes.
 {BRIDGE_END}"""
@@ -58,6 +58,8 @@ PROJECT_ASSETS = (
     ("playbooks/core.md", f"{HARNESS_DIR}/playbooks/core.md", 0o644),
     ("playbooks/conversation.md", f"{HARNESS_DIR}/playbooks/conversation.md", 0o644),
     ("playbooks/dependencies.md", f"{HARNESS_DIR}/playbooks/dependencies.md", 0o644),
+    ("playbooks/planning.md", f"{HARNESS_DIR}/playbooks/planning.md", 0o644),
+    ("playbooks/implementation.md", f"{HARNESS_DIR}/playbooks/implementation.md", 0o644),
     ("playbooks/architecture.md", f"{HARNESS_DIR}/playbooks/architecture.md", 0o644),
     ("playbooks/verification.md", f"{HARNESS_DIR}/playbooks/verification.md", 0o644),
     ("playbooks/documentation.md", f"{HARNESS_DIR}/playbooks/documentation.md", 0o644),
