@@ -1,25 +1,32 @@
 <!-- engineering-harness:installer-owned -->
-# Objective decisions
+# Requirement alignment
 
-Ask only when the answer can change product behavior, architecture, cost, security, an external
-contract, or a hard-to-reverse choice. First resolve facts available from the Project.
+Resolve facts available from the Project before asking the user. Ask when an answer can
+materially change product behavior, architecture, cost, security, an external contract, or a
+hard-to-reverse choice.
 
-Batch independent questions once. Use:
+Batch independent questions in one concise group. Ask dependent follow-ups only after the
+earlier answer changes the available options. Do not force a one-question-at-a-time ritual.
+
+When options help, compare each on the same dimensions:
 
 ```text
 Facts
-- <observation with path, symbol, config key, exact version, or command evidence>
+- <repository or product fact and its evidence>
 
 Questions
 1. <neutral question>
-   A. <real option: effect and tradeoff>
-   B. <real option: effect and tradeoff>
-   C. <real option: effect and tradeoff>
+   A. <real option — effect and tradeoff>
+   B. <real option — effect and tradeoff>
 
-Recommendations
-1. <choice> — <explicit criteria and evidence-based reason>
+Recommendation
+- <choice> — <criteria and evidence-based reason>
 ```
 
-Apply the same comparison dimensions to every option. Do not label an option “recommended,” make
-straw alternatives, hide costs, or mix the recommendation into the choices. If no answer is
-needed, proceed with a stated, reversible assumption.
+Adapt this shape to natural conversation; it is not a required form. Keep recommendations
+separate from neutral choices, avoid straw alternatives, and explain what each answer changes.
+If no answer is needed, proceed with a stated reversible assumption.
+
+Accept ordinary language such as “yes,” “okay,” “do that,” or its equivalent in the user's
+language when the referent is clear. Ask for clarification only when the referent is genuinely
+ambiguous or the action needs new authority.

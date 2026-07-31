@@ -17,6 +17,7 @@ if str(RUNTIME_ROOT) not in sys.path:
 from engineering_harness_gate.codex import (
     READ_ONLY_RESEARCH_TOOLS_ENV,
     STATE_PATH_ENV,
+    AssistiveCodexAdapter,
     main as gate_main,
 )
 
@@ -43,12 +44,16 @@ def main() -> int:
         )
         if not isinstance(config, dict):
             raise ValueError("Harness config must be an object")
-        research = config.get("research")
+        write_gate = config.get("write_gate", {})
+        if not isinstance(write_gate, dict):
+            raise ValueError("Harness write_gate config must be an object")
+        mode = write_gate.get("mode", "assistive")
+        if mode not in {"assistive", "strict"}:
+            raise ValueError("write_gate.mode must be assistive or strict")
+        research = config.get("research", {})
         if not isinstance(research, dict):
             raise ValueError("Harness research config must be an object")
-        read_only_research_tools = research.get(
-            "read_only_tool_names", []
-        )
+        read_only_research_tools = research.get("read_only_tool_names", [])
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
         response = {
             "hookSpecificOutput": {
@@ -57,6 +62,14 @@ def main() -> int:
                 "permissionDecisionReason": f"Engineering Harness failed closed: {error}",
             }
         }
+        print(json.dumps(response, separators=(",", ":"), sort_keys=True))
+        return 0
+    if mode == "assistive":
+        try:
+            payload = json.load(sys.stdin)
+        except (json.JSONDecodeError, UnicodeError) as error:
+            payload = {"_malformed_hook_input": str(error)}
+        response = AssistiveCodexAdapter(args.repo).hook_response(payload)
         print(json.dumps(response, separators=(",", ":"), sort_keys=True))
         return 0
     environ = dict(os.environ)

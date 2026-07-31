@@ -12,9 +12,11 @@ Before changing this repository:
   test evidence.
 - Keep `AGENTS.md` as a thin entrypoint. Route detailed procedures through
   progressively loaded playbooks.
-- Treat prompts as guidance and enforce deterministic prerequisites with
-  provider hooks or an equivalent fail-closed capability boundary.
-- Use DDD language, cohesive modules, and ports/adapters by default, but create
-  physical layers only when real boundaries or invariants justify them.
+- Treat prompts as workflow guidance. Keep the default provider Hook a thin
+  boundary for secrets, Harness internals, provider configuration, and the
+  verification canary; do not blanket-block normal or future tools.
+- Follow the repository's current architecture first. Use DDD, cohesive
+  modules, ports/adapters, or other patterns only when the actual boundaries
+  and tradeoffs justify them.
 - Do not create progress reports, meeting notes, speculative roadmaps, or
   duplicate documentation.

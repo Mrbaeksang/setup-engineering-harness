@@ -263,9 +263,16 @@ def audit(root: Path) -> tuple[list[str], list[str], int]:
                     if write_gate is not None:
                         if not isinstance(write_gate, dict):
                             raise ValueError("write_gate must be an object")
-                        if not isinstance(
-                            write_gate.get("auto_approve_reversible_lite"),
-                            bool,
+                        mode = write_gate.get("mode", "assistive")
+                        if mode not in {"assistive", "strict"}:
+                            raise ValueError(
+                                "write_gate.mode must be assistive or strict"
+                            )
+                        auto_approve = write_gate.get(
+                            "auto_approve_reversible_lite"
+                        )
+                        if auto_approve is not None and not isinstance(
+                            auto_approve, bool
                         ):
                             raise ValueError(
                                 "write_gate.auto_approve_reversible_lite must be boolean"
@@ -273,10 +280,17 @@ def audit(root: Path) -> tuple[list[str], list[str], int]:
                         maximum = write_gate.get("max_auto_scope_globs")
                         minutes = write_gate.get("lease_minutes")
                         if (
-                            type(maximum) is not int
-                            or not 1 <= maximum <= 16
-                            or type(minutes) is not int
-                            or not 5 <= minutes <= 60
+                            maximum is not None
+                            and (
+                                type(maximum) is not int
+                                or not 1 <= maximum <= 16
+                            )
+                        ) or (
+                            minutes is not None
+                            and (
+                                type(minutes) is not int
+                                or not 5 <= minutes <= 60
+                            )
                         ):
                             raise ValueError("write_gate limits are invalid")
                 except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
@@ -296,7 +310,7 @@ def audit(root: Path) -> tuple[list[str], list[str], int]:
             runtime_capabilities = capabilities
             for capability, message in (
                 (
-                    "scoped_write_lease",
+                    "strict_scoped_write_lease",
                     "installed runtime does not implement scoped Write Leases",
                 ),
                 (
@@ -438,7 +452,8 @@ def audit(root: Path) -> tuple[list[str], list[str], int]:
                     raise ValueError("context broker digest mismatch")
                 if (
                     status.get("runtimeReady") is not True
-                    or runtime_capabilities.get("scoped_write_lease") is not True
+                    or runtime_capabilities.get("strict_scoped_write_lease")
+                    is not True
                 ):
                     incomplete.append("trusted scoped-lease runtime is not synchronized")
                 if (

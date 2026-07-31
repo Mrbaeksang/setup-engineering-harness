@@ -95,6 +95,13 @@ class InstalledLeaseLifecycleTest(unittest.TestCase):
         self.assertEqual(
             installed.returncode, 3, installed.stdout + installed.stderr
         )
+        config_path = self.repo / ".agent-harness" / "config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config.setdefault("write_gate", {})["mode"] = "strict"
+        config_path.write_text(
+            json.dumps(config) + "\n",
+            encoding="utf-8",
+        )
         self.manifest = json.loads(
             (self.repo / ".agent-harness" / "manifest.json").read_text(
                 encoding="utf-8"
@@ -581,7 +588,11 @@ class InstalledLeaseLifecycleTest(unittest.TestCase):
         self.assertEqual(state["phase"], "implementing")
 
     def test_decision_required_never_auto_issues_or_clears_on_reply(self) -> None:
-        self.run_prompt("실시간 AI 채팅 서비스를 만들어줘")
+        initial = self.run_prompt("실시간 AI 채팅 서비스를 만들어줘")
+        self.assertNotIn(
+            "set-acceptance",
+            initial["hookSpecificOutput"]["additionalContext"],
+        )
         before = json.loads(self.state_path.read_text(encoding="utf-8"))
         self.assertEqual(before["phase"], "decision-required")
         self.assertTrue(before["pendingDecisions"])
@@ -597,8 +608,27 @@ class InstalledLeaseLifecycleTest(unittest.TestCase):
         )
         self.assertIsNone(after_request["writeLease"])
 
-        self.run_prompt(
+        reply = self.run_prompt(
             "동시 접속은 20명이고 SSE만 필요해. 데이터는 저장하지 않아."
+        )
+        reply_context = reply["hookSpecificOutput"]["additionalContext"]
+        contract = json.loads(
+            (self.state_path.parent / "task-contract.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        acceptance_suffix = shlex.join(
+            [
+                "set-acceptance",
+                f"task={contract['taskId']}",
+                f"revision={contract['taskRevision']}",
+                f"provenance={contract['latestPromptHash']}",
+                "resolve=DECISION-product-contract",
+            ]
+        )
+        self.assertIn(
+            acceptance_suffix,
+            reply_context,
         )
         after_reply = json.loads(
             self.state_path.read_text(encoding="utf-8")

@@ -2181,6 +2181,8 @@ def _installed_scoped_lease_canary(
 
     state_path: Path | None = None
     original_state: bytes | None = None
+    config_path = run_root / ".agent-harness" / "config.json"
+    original_config: bytes | None = None
     cleanup: list[Path] = []
     tree_before, _ = _filesystem_tree(run_root)
     deny_results: list[bool] = []
@@ -2205,6 +2207,14 @@ def _installed_scoped_lease_canary(
         )
 
         manifest = _read_json_object(manifest_path)
+        original_config = config_path.read_bytes()
+        config = _read_json_object(config_path)
+        write_gate = config.get("write_gate")
+        if not isinstance(write_gate, dict):
+            write_gate = {}
+            config["write_gate"] = write_gate
+        write_gate["mode"] = "strict"
+        _write_json_object(config_path, config)
         host = manifest["host_runtime"]
         state_path = Path(host["state_path"]).resolve(strict=True)
         status_path = Path(host["status_path"]).resolve(strict=True)
@@ -2375,6 +2385,11 @@ def _installed_scoped_lease_canary(
         if state_path is not None and original_state is not None:
             try:
                 state_path.write_bytes(original_state)
+            except OSError:
+                pass
+        if original_config is not None:
+            try:
+                config_path.write_bytes(original_config)
             except OSError:
                 pass
 

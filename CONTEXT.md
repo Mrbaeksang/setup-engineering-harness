@@ -6,8 +6,9 @@
 The single AI the user talks to while working in a configured Project.
 
 **Engineering Harness**:
-The installed project behavior that guides and mechanically constrains the
-Coding Agent from conversation through verified completion.
+The installed project behavior that guides the Coding Agent from conversation
+through verified completion and applies only narrow configured safety
+constraints.
 
 **Setup Skill**:
 The one-shot, idempotent skill that inspects a Project, asks only unresolved
@@ -34,8 +35,9 @@ A focused procedure loaded only when the current Task matches its trigger.
 _Avoid_: Always-loaded prompt, project history
 
 **Gate**:
-A mechanically enforced prerequisite controlling whether a protected action,
-especially a write or completion claim, may proceed.
+A mechanically enforced prerequisite controlling a specifically protected
+action. In default assistive mode this is narrow; strict mode can opt into a
+scoped write lifecycle.
 _Avoid_: Reminder, suggestion, checklist
 
 **Evidence**:

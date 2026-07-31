@@ -1,53 +1,42 @@
 {
   "_ownership": "installer-owned",
   "schema_version": 1,
-  "protocol": "engineering-harness-gate-v1",
-  "bundled_runtime": "structured-lifecycle-v2",
+  "protocol": "engineering-harness-adaptive-v1",
+  "default_mode": "assistive",
   "authoritative_state": "xdg-user-state-outside-project",
-  "project_brokers": {
+  "modes": {
+    "assistive": {
+      "prompt_context": "adaptive workflow guidance without lifecycle state mutation",
+      "normal_execution": "provider permissions and sandbox",
+      "protected_native_writes": [
+        "secrets and credentials",
+        ".agent-harness/**",
+        ".git/**",
+        "provider hook configuration",
+        ".engineering-harness-provider-canary",
+        "project-root escape"
+      ],
+      "unknown_tools": "allowed; no blanket tool-name allowlist"
+    },
+    "strict": {
+      "protocol": "structured-lifecycle-v2",
+      "acceptance": "structured outcome and observable criteria",
+      "write_authority": "scoped Write Lease",
+      "verification": "isolated snapshot receipt",
+      "availability": "explicit compatibility mode"
+    }
+  },
+  "project_helpers": {
     "read": ".agent-harness/bin/read_context.py",
-    "lease_request": ".agent-harness/bin/request_write_lease.py",
+    "strict_lease": ".agent-harness/bin/request_write_lease.py",
     "verification": ".agent-harness/bin/run_verification.py"
   },
   "capabilities": {
-    "locked_write_deny": true,
-    "read_only_context_broker": true,
-    "scoped_write_lease": true,
+    "adaptive_prompt_context": true,
+    "stack_neutral_playbooks": true,
     "provider_trust_verification": true,
-    "write_canary_verification": true
-  },
-  "lifecycle": {
-    "initial_state": "discovery-locked until a complete structured acceptance contract",
-    "user_turn": "new turns revoke leases; explicit continuation advances the Task revision",
-    "approval": "exact UserPrompt approval provenance or out-of-band user broker action",
-    "verification": "successful isolated snapshot receipts must match unchanged live output",
-    "completion": "all current receipts required before complete revokes the lease"
-  },
-  "write_lease_contract": {
-    "acceptanceHash": "bound to structured outcome, criteria, exclusions, assumptions, Task revision, and user provenance",
-    "allowedGlobs": "scoped project-relative paths",
-    "allowedCommands": "exact complete command strings only",
-    "baseTreeHash": "Git HEAD plus outside-scope filesystem observation",
-    "evidence": "regular project files re-attested on protected actions",
-    "shell_prefix_suffix_or_redirection": "denied",
-    "candidate_commands_are_authority": false
-  },
-  "gate_state_schema": {
-    "style": "camelCase",
-    "required": [
-      "acceptanceHash",
-      "schemaVersion",
-      "taskId",
-      "projectId",
-      "projectRoot",
-      "readBrokerPythonExecutables",
-      "protectedGlobs",
-      "baseTreeHash",
-      "phase",
-      "evidence",
-      "pendingDecisions",
-      "writeLease"
-    ]
+    "write_canary_verification": true,
+    "strict_scoped_write_lease": true
   },
   "synchronization_required": [
     "provider hook trust confirmation",

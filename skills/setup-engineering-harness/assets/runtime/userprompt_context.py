@@ -92,6 +92,56 @@ def block_after_prompt_failure(args: argparse.Namespace) -> int:
     return 0
 
 
+def assistive_context(repo: Path, maximum: int) -> str:
+    profile: dict[str, Any] = {}
+    try:
+        profile = object_from(repo / ".agent-harness" / "repo-profile.json")
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    facts = profile.get("facts", {})
+    manifests = facts.get("manifests", []) if isinstance(facts, dict) else []
+    existing = isinstance(manifests, list) and bool(manifests)
+    repository_rule = (
+        "This is an existing repository: inspect its manifests, lockfiles, "
+        "source, tests, and exact installed versions first. Keep its current "
+        "stack when it satisfies the requirement; upgrade only for a concrete reason."
+        if existing
+        else
+        "Treat this as greenfield until repository facts prove otherwise. Compare "
+        "2-3 currently suitable candidates against explicit product and operating criteria."
+    )
+    lines = [
+        "Engineering Harness — adaptive workflow:",
+        "- Align on the requested outcome and observable acceptance. Ask only "
+        "consequential unresolved questions; batch independent questions, and "
+        "sequence only questions whose answers change the next question.",
+        f"- {repository_rule}",
+        "- Treat model memory as a hypothesis. For frameworks, libraries, SDKs, "
+        "APIs, migrations, and stack choices, verify current stable behavior from "
+        "primary official sources. Establish exact installed versions in existing "
+        "repositories, then re-learn the exact relevant version through "
+        "official docs and migrations, then types/source or a minimal reproduction "
+        "when needed.",
+        "- Match process to task size: small fixes use reproduce → fix → regression "
+        "→ verify; medium work uses align → research → compact spec → implement → "
+        "verify; large work adds a user choice and tracer-bullet vertical slices.",
+        "- Artifacts are on-demand: keep simple work in the conversation, write a "
+        "durable CONTEXT/ADR only for lasting domain or architecture decisions, "
+        "and create tickets only for large multi-context work. Do not create "
+        "meeting notes, progress reports, or speculative roadmaps.",
+        "- Before completion, inspect the diff and run fresh verification "
+        "proportionate to the change. Report what changed, proof run, and any "
+        "remaining risk without claiming checks that were not run.",
+        "- Read `.agent-harness/router.md` before broad exploration and load only "
+        "the Playbooks routed for this task. Normal app writes and research tools "
+        "do not require Harness acceptance tokens or leases.",
+    ]
+    context = "\n".join(lines)
+    if len(context) > maximum:
+        context = context[: maximum - 1] + "…"
+    return context
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--state", type=Path, required=True)
@@ -113,6 +163,31 @@ def main() -> int:
         if not isinstance(maximum, int):
             maximum = 1800
         maximum = max(400, min(maximum, 2400))
+        write_gate = config.get("write_gate", {})
+        if not isinstance(write_gate, dict):
+            raise ValueError("write_gate config must be an object")
+        mode = write_gate.get("mode", "assistive")
+        if mode not in {"assistive", "strict"}:
+            raise ValueError("write_gate.mode must be assistive or strict")
+        if mode == "assistive":
+            context = (
+                assistive_context(args.repo, maximum)
+                if adaptive_enabled
+                else (
+                    "Engineering Harness assistive mode: read "
+                    "`.agent-harness/router.md` before broad exploration. "
+                    "Normal app work uses provider permissions; protect secrets, "
+                    "Harness internals, and unrelated user changes."
+                )
+            )
+            result = {
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": context,
+                }
+            }
+            print(json.dumps(result))
+            return 0
         state = object_from(args.state)
         gate = state.get("phase", "unavailable")
     except (OSError, ValueError, json.JSONDecodeError):
@@ -240,11 +315,7 @@ def main() -> int:
                 "`verify=…`, and `evidence=<kind>:<path>` tokens to the "
                 "lifecycle prefix."
             )
-        elif (
-            task_context
-            and not acceptance_complete
-            and not pending_decisions
-        ):
+        elif task_context and not acceptance_complete:
             task_id = task_context.get("taskId")
             revision = task_context.get("taskRevision")
             provenance = task_context.get("latestPromptHash")
@@ -252,17 +323,27 @@ def main() -> int:
                 isinstance(task_id, str)
                 and isinstance(revision, int)
                 and isinstance(provenance, str)
+                and (not pending_decisions or revision > 1)
             ):
-                acceptance_suffix = shlex.join(
-                    [
-                        "set-acceptance",
-                        f"task={task_id}",
-                        f"revision={revision}",
-                        f"provenance={provenance}",
-                    ]
+                acceptance_tokens = [
+                    "set-acceptance",
+                    f"task={task_id}",
+                    f"revision={revision}",
+                    f"provenance={provenance}",
+                ]
+                acceptance_tokens.extend(
+                    f"resolve={decision}"
+                    for decision in pending_decisions
+                )
+                acceptance_suffix = shlex.join(acceptance_tokens)
+                acceptance_condition = (
+                    "If this later user turn answers every pending Decision, "
+                    "append exact"
+                    if pending_decisions
+                    else "Discovery lock: after bounded reads append exact"
                 )
                 lines.append(
-                    "- Discovery lock: after bounded reads append exact "
+                    f"- {acceptance_condition} "
                     f"`{acceptance_suffix}` plus hyphenated single-token "
                     "`outcome=… criterion=…-test exclusion=… assumption=…` "
                     "values to the lifecycle prefix; no spaces, quotes, escapes, "

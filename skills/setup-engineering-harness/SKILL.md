@@ -1,6 +1,6 @@
 ---
 name: setup-engineering-harness
-description: Inspect an existing repository and deterministically plan, install, audit, repair, or uninstall its project-local evidence-gated coding harness. Use when asked to set up the repository so one coding agent automatically asks objective batched questions, researches exact dependency versions and native capabilities, plans narrow changes, verifies claims, maintains durable documentation, or when an existing Engineering Harness must be checked or restored without replacing user instructions.
+description: Inspect a repository and deterministically plan, install, audit, repair, or uninstall its adaptive coding workflow. Use when asked to configure one coding agent to align requirements naturally, batch independent questions, research exact and current dependency behavior, select a suitable stack without framework bias, plan proportionately, verify claims, and preserve only durable documentation without replacing user instructions.
 ---
 
 # Set Up Engineering Harness
@@ -39,13 +39,17 @@ Playbooks only when routed.
    then rerun `verify-provider`. Persisted hook trust is a provider/user
    security decision; do not forge or edit it.
 
-6. Report `PASS`, `INCOMPLETE`, or `FAIL` exactly. `INCOMPLETE` means an enforcement prerequisite
-   is still unverified.
+6. Report `PASS`, `INCOMPLETE`, or `FAIL` exactly. `INCOMPLETE` means a provider or integrity
+   prerequisite is still unverified.
 
 Install, repair, audit, and uninstall use the Python 3.12-or-newer standard library only. They never run
 Project commands, read secrets, change application code, or install packages. `verify-provider`
-runs only the reserved write-deny canary, restores Task state, and binds its receipt to the
-current manifest checksum.
+runs only the reserved write-deny canary and binds its receipt to the current manifest checksum.
+
+The seeded default is `write_gate.mode = "assistive"`: normal reads, research tools, shell
+commands, verification, and app writes use the provider's ordinary permissions. The Hook protects
+secrets, Harness-owned paths, provider Hook configuration, and the reserved canary. `strict` is an
+explicit compatibility mode for the scoped-lease protocol.
 
 ## Ownership and recovery
 

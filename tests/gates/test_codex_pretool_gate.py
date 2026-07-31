@@ -16,6 +16,7 @@ from runtime.application.lease_lifecycle import (
 from runtime.adapters.codex.pretool_gate import (
     READ_ONLY_RESEARCH_TOOLS_ENV,
     STATE_PATH_ENV,
+    AssistiveCodexAdapter,
     CodexGateAdapter,
     FileGateStateSource,
     build_read_broker_command,
@@ -35,6 +36,124 @@ from tests.gates.support import (
 class BrokenStateSource:
     def read(self) -> bytes:
         raise GateStateReadError("simulated unreadable state")
+
+
+class AssistiveCodexAdapterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name, "project").resolve()
+        self.root.mkdir()
+
+    def payload(
+        self,
+        tool_name: str,
+        tool_input: dict[str, object],
+        *,
+        cwd: Path | None = None,
+    ) -> dict[str, object]:
+        return {
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "cwd": str(cwd or self.root),
+        }
+
+    def test_allows_normal_development_and_specialized_tools(self) -> None:
+        adapter = AssistiveCodexAdapter(self.root)
+        cases = (
+            self.payload("exec_command", {"cmd": "npm test"}),
+            self.payload(
+                "apply_patch",
+                {
+                    "patch": (
+                        "*** Begin Patch\n"
+                        "*** Add File: src/new.ts\n"
+                        "+export const value = 1;\n"
+                        "*** End Patch\n"
+                    )
+                },
+            ),
+            self.payload(
+                "mcp__context7__query_docs",
+                {"libraryId": "/vercel/next.js", "query": "routing"},
+            ),
+            self.payload("imagegen", {"prompt": "character sprite"}),
+        )
+
+        for payload in cases:
+            with self.subTest(tool=payload["tool_name"]):
+                self.assertTrue(adapter.evaluate_payload(payload).allowed)
+
+    def test_only_guards_harness_secrets_and_reserved_canary(self) -> None:
+        adapter = AssistiveCodexAdapter(self.root)
+        cases = (
+            self.payload("Write", {"path": ".env", "content": "SECRET=x"}),
+            self.payload(
+                "apply_patch",
+                {
+                    "patch": (
+                        "*** Begin Patch\n"
+                        "*** Update File: .agent-harness/config.json\n"
+                        "@@\n"
+                        "-{}\n"
+                        "+{\"write_gate\": {}}\n"
+                        "*** End Patch\n"
+                    )
+                },
+            ),
+            self.payload(
+                "Write",
+                {"path": ".codex/hooks.json", "content": "{}"},
+            ),
+            self.payload(
+                "exec_command",
+                {"cmd": "touch .engineering-harness-provider-canary"},
+            ),
+        )
+
+        for payload in cases:
+            with self.subTest(tool=payload["tool_name"]):
+                decision = adapter.evaluate_payload(payload)
+                self.assertFalse(decision.allowed)
+                self.assertIn(
+                    decision.code,
+                    {"protected-path", "reserved-canary"},
+                )
+
+    def test_hook_is_noop_outside_its_project(self) -> None:
+        outside = Path(self.temp.name, "other-project")
+        outside.mkdir()
+        decision = AssistiveCodexAdapter(self.root).evaluate_payload(
+            self.payload(
+                "Write",
+                {"path": "src/other.ts", "content": "x"},
+                cwd=outside,
+            )
+        )
+
+        self.assertTrue(decision.allowed)
+        self.assertEqual(decision.code, "outside-project")
+
+    def test_write_from_project_cannot_escape_with_traversal_or_symlink(
+        self,
+    ) -> None:
+        outside = Path(self.temp.name, "outside")
+        outside.mkdir()
+        (self.root / "link").symlink_to(outside, target_is_directory=True)
+        adapter = AssistiveCodexAdapter(self.root)
+
+        traversal = adapter.evaluate_payload(
+            self.payload("Write", {"path": "../escape.ts", "content": "x"})
+        )
+        symlink = adapter.evaluate_payload(
+            self.payload("Write", {"path": "link/escape.ts", "content": "x"})
+        )
+
+        self.assertFalse(traversal.allowed)
+        self.assertEqual(traversal.code, "out-of-project")
+        self.assertFalse(symlink.allowed)
+        self.assertEqual(symlink.code, "symlink-escape")
 
 
 class CodexAdapterTests(unittest.TestCase):

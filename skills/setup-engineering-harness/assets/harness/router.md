@@ -1,8 +1,8 @@
 <!-- engineering-harness:installer-owned -->
 # Engineering Harness router
 
-Use the Harness for one Coding Agent. It guides work but never overrides higher-priority user or
-repository instructions.
+Use the Harness for one Coding Agent. It adapts to the user and repository; it does not prescribe
+a framework, architecture, or document set.
 
 ## Start
 
@@ -12,17 +12,21 @@ repository instructions.
 
 | Signal | Playbook |
 | --- | --- |
-| Ambiguous outcome, behavior, or choice | `playbooks/conversation.md` |
-| Package, SDK, API, framework, tool, migration, or dependency bug | `playbooks/dependencies.md` |
+| Consequential unresolved requirement or choice | `playbooks/conversation.md` |
+| Package, SDK, API, framework, tool, migration, or stack selection | `playbooks/dependencies.md` |
+| Medium or large change needing a compact spec or slices | `playbooks/planning.md` |
+| Any code or behavior change | `playbooks/implementation.md` and `playbooks/verification.md` |
 | Domain, module, contract, persistence, or external boundary | `playbooks/architecture.md` |
-| Any behavior, code, UI, build, or performance change | `playbooks/verification.md` |
 | Durable repository knowledge changes | `playbooks/documentation.md` |
 
-While the write Gate is locked, use the exact context-broker prefix injected by the
-`UserPromptSubmit` hook, followed by a supported read subcommand. Submit the structured acceptance
-contract with its injected exact lifecycle prefix. Once acceptance, Evidence, scope, and
-verification are concrete, use the exact lease-request prefix and canonical `scope=…`,
-`verify=…`, and `evidence=<kind>:<path>` tokens. Dependency claims and official registrations are
-defined in `playbooks/dependencies.md`. A proposal is not a lease. Do not route around the Gate.
-Before completion, use the injected context-broker `git-status` and `git-diff` commands; raw Git
-is intentionally denied.
+Use the smallest workflow that fits:
+
+- Small fix: reproduce → fix → regression → verify.
+- Medium change: align → research → compact spec → implement → verify.
+- Large or costly change: align deeply → research → user choice → compact spec → tracer-bullet
+  vertical slices → implement and verify slice by slice.
+
+Normal research, repository reads, verification commands, and application writes do not require
+Harness-specific acceptance tokens, proposal IDs, or leases in the default `assistive` mode.
+The optional `strict` mode exists for projects that explicitly choose the legacy scoped-lease
+boundary.

@@ -6,9 +6,9 @@
     "max_characters": 1800
   },
   "architecture_defaults": {
-    "ddd": true,
-    "modular": true,
-    "hexagonal": true,
+    "ddd": false,
+    "modular": false,
+    "hexagonal": false,
     "ceremonial_layers": false
   },
   "project": {
@@ -21,6 +21,7 @@
     "read_only_tool_names": []
   },
   "write_gate": {
+    "mode": "assistive",
     "auto_approve_reversible_lite": true,
     "lease_minutes": 30,
     "max_auto_scope_globs": 8
